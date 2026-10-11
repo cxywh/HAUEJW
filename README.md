@@ -20,7 +20,7 @@
 
 ## 下载
 
-到 [Releases](../../releases) 下载最新的 `教务助手-<版本>.apk`，传到手机安装即可。
+到 [Releases](../../releases) 下载最新的 `HAUEJW-<版本>.apk`，传到手机安装即可。
 
 APK 使用个人签名（CN=HAUEJW）。安卓提示"未知来源"时，在系统设置里允许安装即可。
 
