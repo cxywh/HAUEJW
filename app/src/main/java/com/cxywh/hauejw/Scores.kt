@@ -123,12 +123,12 @@ internal fun entryYearOf(ctx: android.content.Context): Int? =
  */
 internal fun relogin(ctx: android.content.Context): Boolean = try {
     val user = Prefs(ctx).username
-    val pass = SecretStore.load(ctx)
+    val pass = SecretStore.load(ctx, user)
     if (user.isBlank() || pass.isNullOrBlank()) {
         false
     } else {
         JwApi.login(user, pass)
-        runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, it) } }.onFailure { e -> Diag.record("Scores.relogin", e) }
+        runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, user, it) } }.onFailure { e -> Diag.record("Scores.relogin", e) }
         true
     }
 } catch (e: Exception) {

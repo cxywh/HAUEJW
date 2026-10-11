@@ -42,6 +42,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDateTime
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
+import kotlin.math.abs
 
 internal sealed interface Screen {
     data object Loading : Screen
@@ -60,6 +64,14 @@ internal fun Screen.Main.board(): Timetable = base.withCourses(edits.apply(base.
 internal fun Root(prefs: Prefs) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
+
+    // 老版本只认一个账号（键名没有学号后缀）：首次启动把它挪到当前学号名下，省得重输一遍密码
+    LaunchedEffect(Unit) {
+        if (prefs.username.isNotBlank()) {
+            SecretStore.migrateLegacy(ctx, prefs.username)
+            if (SecretStore.has(ctx, prefs.username)) prefs.addAccount(prefs.username)
+        }
+    }
     var screen by remember { mutableStateOf<Screen>(Screen.Loading) }
 
     // 横幅（「已更新…」/「更新失败…」）显示 3 秒后自动消失，别一直挂在课表上面
@@ -187,11 +199,12 @@ internal fun Root(prefs: Prefs) {
                             }
                             // 记住密码：登录成功之后才写，避免把打错的密码存下来
                             prefs.rememberPassword = rememberPw
-                            val pwSaved = if (rememberPw) SecretStore.save(ctx, pw) else { SecretStore.clear(ctx); true }
+                            val pwSaved = if (rememberPw) SecretStore.save(ctx, u, pw) else true
+                            if (rememberPw) prefs.addAccount(u)
+                            else { SecretStore.forget(ctx, u); prefs.removeAccount(u) }
                             username = u
-                            // 会话 Cookie 也加密存一份：App 被系统回收/重装后直达页还能保持已登录，
-                            // 否则页面照常打开、按钮点了全没反应（排查了很久的那个症状）。
-                            runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, it) } }.onFailure { e -> Diag.record("MainActivity.refreshFrom", e) }
+                            // 会话 Cookie 也按账号加密存一份，切换账号时能少登一次
+                            runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, u, it) } }.onFailure { e -> Diag.record("MainActivity.refreshFrom", e) }
                             applyMain(
                                 tt, prefs.edits,
                                 notice = if (rememberPw && !pwSaved) "登录成功；但这台设备不支持安全保存密码，请勿勾选「记住密码」"
@@ -289,8 +302,10 @@ internal fun LoginScreen(
     var remember by remember { mutableStateOf(prefs.rememberUsername) }
     var rememberPw by remember { mutableStateOf(prefs.rememberPassword) }
     // 之前勾过「记住密码」的话，这里用系统密钥库里的密钥解密还原（取不到就是空）
-    var pw by remember { mutableStateOf(if (prefs.rememberPassword) SecretStore.load(ctx).orEmpty() else "") }
+    var pw by remember { mutableStateOf(if (prefs.rememberPassword) SecretStore.load(ctx, prefs.username).orEmpty() else "") }
     var pwNote by remember { mutableStateOf<String?>(null) }
+    // 记住过的账号（最近用的排前面），点一下直接用存好的密码登录
+    var savedAccounts by remember { mutableStateOf(mergeAccounts(prefs.accounts, SecretStore.accounts(ctx))) }
 
     val onAccent = C.onAccent
 
@@ -328,8 +343,10 @@ internal fun LoginScreen(
                     onCheckedChange = { on ->
                         rememberPw = on
                         if (!on) {
-                            SecretStore.clear(ctx)
-                            pwNote = "已清除本机保存的密码"
+SecretStore.forget(ctx, prefs.username)
+                        prefs.removeAccount(prefs.username)
+                        pw = ""
+                        pwNote = "已清除这个账号保存的密码"
                         } else {
                             pwNote = null
                         }
@@ -369,6 +386,55 @@ internal fun LoginScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(error, color = C.danger, fontSize = 12.5.sp)
             }
+        }
+
+        if (savedAccounts.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("已记住的账号（点一下直接登录）", fontSize = 11.5.sp, color = C.dim)
+            Spacer(Modifier.height(8.dp))
+            savedAccounts.forEach { acc ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                        .clip(RoundedCornerShape(11.dp)).background(C.card)
+                        .clickable {
+                            val saved = SecretStore.load(ctx, acc)
+                            user = acc
+                            if (saved.isNullOrBlank()) {
+                                pw = ""
+                                pwNote = "这个账号没保存密码，请手动输入"
+                            } else {
+                                pw = saved
+                                prefs.rememberUsername = true
+                                prefs.username = acc
+                                onLogin(acc, saved, true)
+                            }
+                        }
+                        .padding(start = 14.dp, end = 6.dp, top = 11.dp, bottom = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(acc, fontSize = 13.5.sp, color = C.fg, modifier = Modifier.weight(1f))
+                    Text(
+                        "×", fontSize = 16.sp, color = C.dim,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                SecretStore.forget(ctx, acc)
+                                prefs.removeAccount(acc)
+                                if (prefs.username == acc) { prefs.username = ""; prefs.rememberPassword = false }
+                                savedAccounts = savedAccounts.filter { it != acc }
+                            }
+                            .padding(horizontal = 9.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = {
+                SecretStore.clearAll(ctx)
+                prefs.accounts = emptyList()
+                savedAccounts = emptyList()
+                prefs.rememberPassword = false
+                pw = ""
+                pwNote = "已清除全部账号记忆"
+            }) { Text("清除全部账号记忆", color = C.dim, fontSize = 12.sp) }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -522,7 +588,35 @@ internal fun BoardScreen(
         localNotice = if (ok) "已导出图片：${p.first}" else "导出失败，换个位置再试"
     }
 
-    Box(Modifier.fillMaxSize().background(C.screenBg)) {
+    Box(
+        Modifier.fillMaxSize().background(C.screenBg)
+            // 左右滑动切换周次。必须挂最外层并用 Initial 传递阶段：网格自己做了一层横向滚动，
+            // 子级滚动容器在事件派发中永远先于父级拿到拖动，挂在里面根本收不到。
+            // 这里只观察位移、不消费事件，所以卡片点击、内部滚动、沉浸式弹层（pane != null 时直接退出）都不受影响。
+            .pointerInput(pane, week, maxWeek) {
+                if (pane != null) return@pointerInput
+                val threshold = 56.dp.toPx()
+                awaitPointerEventScope {
+                    while (true) {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        var dx = 0f
+                        var dy = 0f
+                        while (true) {
+                            val e = awaitPointerEvent(PointerEventPass.Initial)
+                            val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed) break
+                            dx += ch.positionChange().x
+                            dy += ch.positionChange().y
+                        }
+                        // 横向意图要压过纵向，否则上下滚动课表会误切周次
+                        if (abs(dx) > abs(dy)) {
+                            val nw = swipeWeek(week, dx, threshold, maxWeek)
+                            if (nw != week) { week = nw; prefs.lastWeek = nw }
+                        }
+                    }
+                }
+            }
+    ) {
         Column(Modifier.fillMaxSize()) {
 
             // ── 标题栏 ──

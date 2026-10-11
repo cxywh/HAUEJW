@@ -151,3 +151,13 @@ object WeekUtils {
     /** 返回该日期所在周的周一 */
     fun mondayOfDate(date: LocalDate): LocalDate = date.minusDays((dowOf(date) - 1).toLong())
 }
+
+/**
+ * 左右滑动换周：向左滑（acc 为负，内容往左走）切下一周，向右滑切上一周；幅度不够就停着不动。
+ * 边界夹住，不会滑出第 1 周或最后一周。抽成纯函数是为了让方向语义能钉进单测。
+ */
+internal fun swipeWeek(current: Int, acc: Float, threshold: Float, maxWeek: Int): Int = when {
+    acc <= -threshold -> (current + 1).coerceAtMost(if (maxWeek < 1) 1 else maxWeek)
+    acc >= threshold -> (current - 1).coerceAtLeast(1)
+    else -> current
+}
