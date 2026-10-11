@@ -331,9 +331,9 @@ object JwApi {
         return Timetable(term, student, courses)
     }
 
-    // ───────────────────────── 会话 / 直达 ─────────────────────────
+    // ───────────────────────── 会话 ─────────────────────────
 
-    /** 当前会话的 Cookie 串（供 WebView 注入，实现"已登录状态直达内页"） */
+    /** 当前会话的 Cookie 串；自检用它判断「是否已持有会话」 */
     fun cookieHeader(): String? {
         val cookies = cookieManager.cookieStore.get(java.net.URI.create(BASE)) ?: return null
         val s = cookies.joinToString("; ") { "${it.name}=${it.value}" }
@@ -343,26 +343,6 @@ object JwApi {
     fun logout() {
         try { get("$BASE/jwglxt/xtgl/login_logout.html") } catch (_: Exception) {}
         cookieManager.cookieStore.removeAll()
-    }
-
-    /**
-     * 进程重启后用保存下来的会话串恢复 Cookie。
-     * 不恢复的话：App 被系统回收一次，直达页就静默变成未登录状态（页面照常渲染，按钮全失效）。
-     */
-    fun restoreCookie(header: String) {
-        try {
-            val uri = java.net.URI.create(BASE)
-            header.split(';').map { it.trim() }.filter { it.contains('=') }.forEach { kv ->
-                val i = kv.indexOf('=')
-                if (i > 0) {
-                    cookieManager.cookieStore.add(
-                        uri,
-                        java.net.HttpCookie(kv.substring(0, i).trim(), kv.substring(i + 1).trim()),
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
     }
 
     fun clearCookies() = cookieManager.cookieStore.removeAll()
@@ -494,7 +474,7 @@ object JwApi {
         val ck = cookieHeader()
         out += CheckItem(
             "登录会话", ck != null,
-            if (ck != null) "已持有会话（可直达内页）" else "无会话，需登录",
+            if (ck != null) "已持有会话" else "无会话，需登录",
         )
 
         if (ck != null) {

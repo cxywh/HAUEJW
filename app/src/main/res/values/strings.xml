@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">教务助手</string>
+    <!-- 小组件在桌面「添加小组件」列表里显示的说明 -->
+    <string name="widget_desc">今天课表 · 下一节课 · 学期进度</string>
 </resources>

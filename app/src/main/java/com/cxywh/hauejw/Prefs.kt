@@ -84,10 +84,10 @@ class Prefs(context: Context) {
         get() = sp.getString(key("edits"), null)
         set(v) = sp.edit().putString(key("edits"), v).apply()
 
-    /** 导入的课表（TimelineCodec JSON） */
+    /** 导入的课表（TimelineCodec JSON）——同样按账号隔离，否则 A 导入的课表会串到 B 名下 */
     var importedJson: String?
-        get() = sp.getString("imported", null)
-        set(v) = sp.edit().putString("imported", v).apply()
+        get() = sp.getString(key("imported"), null)
+        set(v) = sp.edit().putString(key("imported"), v).apply()
 
     // 课前提醒
     var remindEnabled: Boolean
@@ -177,6 +177,12 @@ internal fun scopedKey(base: String, account: String): String =
     base + "@" + account.ifBlank { "_default" }
 
 /**
+ * 账号私有数据的键名基名。集中在这一处，避免「加了新的账号数据却忘了加进迁移名单」
+ * —— 迁移漏一个，老用户升级后就会看到「明明登录了却没有课表」。
+ */
+internal val ACCOUNT_SCOPED_KEYS = listOf("tt", "ttAt", "src", "edits", "imported")
+
+/**
  * 老版本这些数据只有一份（键名没有账号后缀）：升级后挪到当前学号名下，
  * 否则用户会看到「明明登录了却像没课表」。
  */
@@ -184,7 +190,7 @@ internal fun migrateSingleAccountData(sp: android.content.SharedPreferences, acc
     if (account.isBlank()) return
     val e = sp.edit()
     var moved = false
-    for (base in listOf("tt", "ttAt", "src", "edits")) {
+    for (base in ACCOUNT_SCOPED_KEYS) {
         if (!sp.contains(base) || sp.contains(scopedKey(base, account))) continue
         when (val v = sp.all[base]) {
             is String -> e.putString(scopedKey(base, account), v)

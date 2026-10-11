@@ -128,7 +128,6 @@ internal fun relogin(ctx: android.content.Context): Boolean = try {
         false
     } else {
         JwApi.login(user, pass)
-        runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, user, it) } }.onFailure { e -> Diag.record("Scores.relogin", e) }
         true
     }
 } catch (e: Exception) {

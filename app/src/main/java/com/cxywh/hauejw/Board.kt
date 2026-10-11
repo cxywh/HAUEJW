@@ -67,6 +67,8 @@ internal fun Root(prefs: Prefs) {
 
     // 老版本只认一个账号（键名没有学号后缀）：首次启动把它挪到当前学号名下，省得重输一遍密码
     LaunchedEffect(Unit) {
+        // 老版本把会话 Cookie 加密存过一份，现在已无人读取：顺手清掉，少一份落盘的凭据
+        SecretStore.purgeSessions(ctx)
         if (prefs.username.isNotBlank()) {
             SecretStore.migrateLegacy(ctx, prefs.username)
             migrateSingleAccountData(ctx.getSharedPreferences("hauejw", android.content.Context.MODE_PRIVATE), prefs.username)
@@ -142,6 +144,9 @@ internal fun Root(prefs: Prefs) {
         scope.launch {
             prefs.username = id
             username = id
+            // 账号决定了小组件读哪份缓存，所以这里必须显式刷一次
+            // （下面两条分支里有一条是 screen = Loading，走不到课表页的 LaunchedEffect）
+            HaueWidget.refresh(ctx)
             val cached = prefs.loadServer()
             if (cached != null) applyMain(cached, prefs.edits, refreshing = true, notice = "已切换到 $id", ok = true)
             else screen = Screen.Loading
@@ -217,8 +222,6 @@ internal fun Root(prefs: Prefs) {
                             if (rememberPw) prefs.addAccount(u)
                             else { SecretStore.forget(ctx, u); prefs.removeAccount(u) }
                             username = u
-                            // 会话 Cookie 也按账号加密存一份，切换账号时能少登一次
-                            runCatching { JwApi.cookieHeader()?.let { SecretStore.saveSession(ctx, u, it) } }.onFailure { e -> Diag.record("MainActivity.refreshFrom", e) }
                             applyMain(
                                 tt, prefs.edits,
                                 notice = if (rememberPw && !pwSaved) "登录成功；但这台设备不支持安全保存密码，请勿勾选「记住密码」"
@@ -283,6 +286,7 @@ internal fun Root(prefs: Prefs) {
                 scope.launch {
                     withContext(Dispatchers.IO) { JwApi.logout() }
                     prefs.timetableCache = null
+                    HaueWidget.refresh(ctx)
                     val imported = prefs.loadImported()
                     if (imported != null) applyMain(imported, prefs.edits, notice = "已退出登录，仍显示导入的课表")
                     else { screen = Screen.Login() }
@@ -293,7 +297,7 @@ internal fun Root(prefs: Prefs) {
                 if (id != prefs.username) {
                     // 存过密码的直接切；没存过的去登录页，学号已填好，只差输密码
                     if (SecretStore.has(ctx, id)) switchAccount(id)
-                    else { prefs.username = id; username = id; screen = Screen.Login() }
+                    else { prefs.username = id; username = id; HaueWidget.refresh(ctx); screen = Screen.Login() }
                 }
             },
             onAddAccount = { screen = Screen.Login() },
@@ -540,6 +544,7 @@ internal fun BoardScreen(
 
     // 课表 / 主题一变就刷新桌面小组件：小组件读的是同一份本地缓存，
     // 这里只是让它"立刻"跟上，不必等半小时一次的兜底闹钟。
+    // 账号边界（切号 / 退出）不在这里 —— 那条路可能根本走不到课表页，由 Root 里显式刷。
     LaunchedEffect(tt, prefs.theme) {
         HaueWidget.refresh(ctx)
     }

@@ -2,6 +2,7 @@ package com.cxywh.hauejw
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -304,6 +305,18 @@ class LogicTest {
     fun scopedKey_未登录时用占位符不与其他账号相撞() {
         assertEquals("tt@_default", scopedKey("tt", ""))
         assertEquals("tt@_default", scopedKey("tt", "   "))
+    }
+
+    @Test
+    fun 账号私有数据的每一种键都必须按账号隔离() {
+        // 曾经漏掉 imported：A 导入的课表会串到 B 名下。清单钉在这里，以后加新键就不会忘。
+        assertTrue(ACCOUNT_SCOPED_KEYS.contains("imported"))
+        for (base in ACCOUNT_SCOPED_KEYS) {
+            val a = scopedKey(base, "202300000001")
+            val b = scopedKey(base, "202200000000")
+            assertNotEquals(a, b)
+            assertTrue(a.startsWith("$base@"))
+        }
     }
 
 }

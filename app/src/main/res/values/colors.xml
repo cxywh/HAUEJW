@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  小组件背景色。
+  RemoteViews 里没法用 Compose 的运行时配色，而圆角只能靠 shape drawable（改不了运行时颜色），
+  所以这两个值必须落在资源里。它们要和 Theme.kt 的 Palettes.light.card / Palettes.dark.card 一致
+  —— 整个小组件只有这两个颜色是手写的，其余（正文/次要/强调）都直接用 Palette.toArgb()。
+-->
+<resources>
+    <color name="widget_bg_light">#FCFDFF</color>
+    <color name="widget_bg_dark">#171A21</color>
+</resources>
