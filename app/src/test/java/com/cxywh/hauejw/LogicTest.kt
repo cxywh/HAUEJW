@@ -293,4 +293,17 @@ class LogicTest {
         assertEquals(listOf("s1"), mergeAccounts(emptyList(), listOf("s1")))
     }
 
+    @Test
+    fun scopedKey_不同账号的课表键必须不同() {
+        assertTrue(scopedKey("tt", "202310527108") != scopedKey("tt", "202212345678"))
+        assertEquals("tt@202310527108", scopedKey("tt", "202310527108"))
+        assertEquals("edits@202310527108", scopedKey("edits", "202310527108"))
+    }
+
+    @Test
+    fun scopedKey_未登录时用占位符不与其他账号相撞() {
+        assertEquals("tt@_default", scopedKey("tt", ""))
+        assertEquals("tt@_default", scopedKey("tt", "   "))
+    }
+
 }

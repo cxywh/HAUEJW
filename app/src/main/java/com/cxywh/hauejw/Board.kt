@@ -69,6 +69,7 @@ internal fun Root(prefs: Prefs) {
     LaunchedEffect(Unit) {
         if (prefs.username.isNotBlank()) {
             SecretStore.migrateLegacy(ctx, prefs.username)
+            migrateSingleAccountData(ctx.getSharedPreferences("hauejw", android.content.Context.MODE_PRIVATE), prefs.username)
             if (SecretStore.has(ctx, prefs.username)) prefs.addAccount(prefs.username)
         }
     }
@@ -132,6 +133,19 @@ internal fun Root(prefs: Prefs) {
                     }
                 },
             )
+        }
+    }
+
+    /** 切换账号：先换当前账号，再读这个账号自己的课表缓存并后台刷新（补登会用新账号的密码） */
+    fun switchAccount(id: String) {
+        if (id.isBlank() || id == prefs.username) return
+        scope.launch {
+            prefs.username = id
+            username = id
+            val cached = prefs.loadServer()
+            if (cached != null) applyMain(cached, prefs.edits, refreshing = true, notice = "已切换到 $id", ok = true)
+            else screen = Screen.Loading
+            refreshFrom(cached, prefs.edits)
         }
     }
 
@@ -275,6 +289,14 @@ internal fun Root(prefs: Prefs) {
                 }
             },
             onLoginAgain = { screen = Screen.Login() },
+            onSwitchAccount = { id ->
+                if (id != prefs.username) {
+                    // 存过密码的直接切；没存过的去登录页，学号已填好，只差输密码
+                    if (SecretStore.has(ctx, id)) switchAccount(id)
+                    else { prefs.username = id; username = id; screen = Screen.Login() }
+                }
+            },
+            onAddAccount = { screen = Screen.Login() },
         )
     }
 }
@@ -482,6 +504,9 @@ internal sealed interface Pane {
     data class EditMenu(val course: Course) : Pane
     data class Rename(val course: Course) : Pane
     data class Move(val course: Course) : Pane
+
+    /** 课表页的账号切换弹层 */
+    data object Accounts : Pane
 }
 @Composable
 internal fun BoardScreen(
@@ -500,6 +525,8 @@ internal fun BoardScreen(
     onDropImported: () -> Unit,
     onLogout: () -> Unit,
     onLoginAgain: () -> Unit,
+    onSwitchAccount: (String) -> Unit,
+    onAddAccount: () -> Unit,
 ) {
     val tt = base.withCourses(edits.apply(base.courses))
     val ctx = LocalContext.current
@@ -656,6 +683,13 @@ internal fun BoardScreen(
                     )
                 }
                 Text(
+                    "切换", fontSize = 12.5.sp, color = C.accent,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(C.accentTint)
+                        .clickable { pane = Pane.Accounts }
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
                     "⋯", fontSize = 20.sp, color = C.dim,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { pane = Pane.Tools }
                         .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -780,6 +814,7 @@ internal fun BoardScreen(
                 onWeeks = { pane = Pane.Weeks },
                 onChanges = { pane = Pane.Changes },
                 onRemind = { pane = Pane.Remind },
+                onAccounts = { pane = Pane.Accounts },
                 onLoginAgain = { pane = null; onLoginAgain() },
                 onLogout = { pane = null; onLogout() },
                 onClose = { pane = null },
@@ -808,6 +843,13 @@ internal fun BoardScreen(
             is Pane.AllCourses -> AllCoursesPane(tt) { pane = null }
             is Pane.Menus -> MenusPane(prefs.menus) { pane = null }
             is Pane.Theme -> ThemePane(prefs, onPick = { id -> prefs.theme = id; C.palette = C.byId(id) }, onClose = { pane = null })
+            is Pane.Accounts -> AccountPane(
+                prefs = prefs,
+                current = tt.student.id.ifBlank { prefs.username },
+                onSwitch = { id -> pane = null; onSwitchAccount(id) },
+                onAdd = { pane = null; onAddAccount() },
+                onClose = { pane = null },
+            )
             is Pane.Detail -> DetailPane(
                 p.course, week,
                 onEdit = { pane = Pane.EditMenu(p.course) },

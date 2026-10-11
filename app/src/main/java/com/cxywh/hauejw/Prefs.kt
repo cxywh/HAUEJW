@@ -9,6 +9,12 @@ class Prefs(context: Context) {
 
     private val sp = context.getSharedPreferences("hauejw", Context.MODE_PRIVATE)
 
+    /** 当前账号；没登录时用占位符，避免键名互相覆盖 */
+    private fun acc() = username.ifBlank { "_default" }
+
+    /** 账号私有数据的键名（课表缓存 / 保存时间 / 来源 / 本地修改），不同账号互不干扰 */
+    private fun key(base: String) = scopedKey(base, username)
+
     var username: String
         get() = sp.getString("username", "") ?: ""
         set(v) = sp.edit().putString("username", v).apply()
@@ -61,22 +67,22 @@ class Prefs(context: Context) {
 
     /** 服务端课表缓存（原始 JSON 响应 + 校历） */
     var timetableCache: String?
-        get() = sp.getString("tt", null)
-        set(v) = sp.edit().putString("tt", v).apply()
+        get() = sp.getString(key("tt"), null)
+        set(v) = sp.edit().putString(key("tt"), v).apply()
 
     var timetableSavedAt: Long
-        get() = sp.getLong("ttAt", 0L)
-        set(v) = sp.edit().putLong("ttAt", v).apply()
+        get() = sp.getLong(key("ttAt"), 0L)
+        set(v) = sp.edit().putLong(key("ttAt"), v).apply()
 
     /** 课表来源：server / imported */
     var source: String
-        get() = sp.getString("src", Source.SERVER) ?: Source.SERVER
-        set(v) = sp.edit().putString("src", v).apply()
+        get() = sp.getString(key("src"), Source.SERVER) ?: Source.SERVER
+        set(v) = sp.edit().putString(key("src"), v).apply()
 
     /** 本地修改（EditLayer 的 JSON） */
     var editsJson: String?
-        get() = sp.getString("edits", null)
-        set(v) = sp.edit().putString("edits", v).apply()
+        get() = sp.getString(key("edits"), null)
+        set(v) = sp.edit().putString(key("edits"), v).apply()
 
     /** 导入的课表（TimelineCodec JSON） */
     var importedJson: String?
@@ -163,3 +169,31 @@ class Prefs(context: Context) {
  */
 internal fun mergeAccounts(order: List<String>, stored: List<String>): List<String> =
     order.filter { it in stored } + stored.filterNot { it in order }
+
+/**
+ * 账号私有数据的键名。抽成纯函数是为了能钉单测 —— 键名串了就等于两个账号的课表互相覆盖。
+ */
+internal fun scopedKey(base: String, account: String): String =
+    base + "@" + account.ifBlank { "_default" }
+
+/**
+ * 老版本这些数据只有一份（键名没有账号后缀）：升级后挪到当前学号名下，
+ * 否则用户会看到「明明登录了却像没课表」。
+ */
+internal fun migrateSingleAccountData(sp: android.content.SharedPreferences, account: String) {
+    if (account.isBlank()) return
+    val e = sp.edit()
+    var moved = false
+    for (base in listOf("tt", "ttAt", "src", "edits")) {
+        if (!sp.contains(base) || sp.contains(scopedKey(base, account))) continue
+        when (val v = sp.all[base]) {
+            is String -> e.putString(scopedKey(base, account), v)
+            is Long -> e.putLong(scopedKey(base, account), v)
+            is Int -> e.putLong(scopedKey(base, account), v.toLong())
+            else -> continue
+        }
+        e.remove(base)
+        moved = true
+    }
+    if (moved) e.apply()
+}
