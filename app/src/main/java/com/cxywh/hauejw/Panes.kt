@@ -157,6 +157,7 @@ internal fun ToolsPane(
     onTheme: () -> Unit, onWeeks: () -> Unit, onChanges: () -> Unit, onRemind: () -> Unit,
     onScores: () -> Unit,
     onExams: () -> Unit,
+    onAccounts: () -> Unit,
     onLoginAgain: () -> Unit, onLogout: () -> Unit, onClose: () -> Unit,
 ) {
     PaneShell(onClose) {
@@ -174,6 +175,7 @@ internal fun ToolsPane(
         RowItem("周次总览", onClick = onWeeks)
         RowItem("本地修改", onClick = onChanges)
         RowItem("课前提醒", onClick = onRemind)
+        RowItem("切换账号", "多个账号各存各的课表", onClick = onAccounts)
         RowItem("重新登录", onClick = onLoginAgain)
         RowItem("退出登录并清除缓存", "本地修改会保留，可稍后撤销", danger = true, onClick = onLogout)
     }
@@ -648,4 +650,50 @@ internal fun Arrow(text: String, enabled: Boolean, onClick: () -> Unit) {
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 10.dp, vertical = 2.dp),
     )
+}
+
+@Composable
+internal fun AccountPane(
+    prefs: Prefs,
+    current: String,
+    onSwitch: (String) -> Unit,
+    onAdd: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val saved = mergeAccounts(prefs.accounts, SecretStore.accounts(ctx))
+    val cur = if (current.isNotBlank()) current else prefs.username
+
+    PaneShell(onClose) {
+        PaneTitle("切换账号", onClose)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "每个账号的课表缓存和本地修改各存各的，互不影响；成绩与考试按当前登录的账号实时查询。",
+            fontSize = 11.5.sp, color = C.dim,
+        )
+        Spacer(Modifier.height(10.dp))
+        if (saved.isEmpty()) {
+            Text(
+                "还没有记住其他账号。用下面的入口登录一次并勾选「记住密码」，之后就能在这里一键切换。",
+                fontSize = 12.5.sp, color = C.dim,
+            )
+            Spacer(Modifier.height(10.dp))
+        } else {
+            saved.forEach { id ->
+                val isCur = id == cur
+                RowItem(
+                    if (isCur) "$id（当前）" else id,
+                    if (isCur) null else "点一下切换到该账号",
+                    onClick = { if (!isCur) onSwitch(id) },
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        RowItem("用其他账号登录", "登录页勾选「记住密码」，下次可一键切换", onClick = onAdd)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "不想再记住某个账号：登录页账号行右侧的「×」可以单独忘掉它。",
+            fontSize = 11.sp, color = C.dim,
+        )
+    }
 }
