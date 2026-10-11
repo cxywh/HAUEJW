@@ -352,7 +352,11 @@ class BootReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
-            -> Reminder.rearmFromPlan(context, Prefs(context))
+            -> {
+                Reminder.rearmFromPlan(context, Prefs(context))
+                // 开机 / 升级后闹钟会被系统清空，桌面上的小组件也停在旧内容上，一并刷新
+                HaueWidget.refresh(context)
+            }
         }
     }
 }

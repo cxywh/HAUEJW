@@ -151,6 +151,11 @@ fun ScoresPane(onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var rows by remember { mutableStateOf<List<ScoreRow>?>(null) }
     var msg by remember { mutableStateOf("") }
+    // 累计 GPA / 学分进度：要跨全部学年学期逐个拉取（最多 12 次请求），
+    // 所以做成用户主动触发并显示进度，不在打开面板时自动跑。
+    var cum by remember { mutableStateOf<ScoreSummary?>(null) }
+    var cumNote by remember { mutableStateOf("") }
+    var cumBusy by remember { mutableStateOf(false) }
 
     // 切换学制后学年列表变短时，别让选中的年份落在列表外
     LaunchedEffect(years) { if (year !in years) year = years.first() }
@@ -191,6 +196,45 @@ fun ScoresPane(onClose: () -> Unit) {
                         "如果提示登录相关，请返回主界面重新登录一次。"
                 },
             )
+        }
+    }
+
+    /** 逐个学期拉一遍并累加。进度写在界面上 —— 这个操作要发十几个请求，不能没有反馈。 */
+    fun loadCumulative() {
+        scope.launch {
+            cumBusy = true
+            cumNote = ""
+            cum = null
+            val pairs = years.flatMap { y -> TERM_OPTIONS.map { y to it.first } }
+            val acc = mutableListOf<ScoreRow>()
+            var emptyTerms = 0
+            var failedTerms = 0
+            pairs.forEachIndexed { i, (y, code) ->
+                cumNote = "读取中 ${i + 1}/${pairs.size}（$y-${y + 1} ${termLabel(code)}）"
+                val got = withContext(Dispatchers.IO) {
+                    runCatching {
+                        try {
+                            ScoresApi.fetch(y, code).rows
+                        } catch (e: Exception) {
+                            if (!relogin(ctx)) throw e
+                            ScoresApi.fetch(y, code).rows
+                        }
+                    }.onFailure { e -> Diag.record("Scores.cumulative", e) }.getOrNull()
+                }
+                when {
+                    got == null -> failedTerms++
+                    got.isEmpty() -> emptyTerms++
+                    else -> acc += got
+                }
+            }
+            cumBusy = false
+            val s = summarize(acc)
+            cum = s
+            cumNote = buildString {
+                append("已汇总 ${pairs.size - failedTerms - emptyTerms} 个学期，${s.count} 条成绩")
+                if (emptyTerms > 0) append("；$emptyTerms 个学期没有成绩")
+                if (failedTerms > 0) append("；$failedTerms 个学期读取失败（可重试）")
+            }
         }
     }
 
@@ -245,12 +289,35 @@ fun ScoresPane(onClose: () -> Unit) {
             Text("共 ${rows?.size ?: 0} 门", fontSize = 12.sp, color = C.dim)
         }
 
+        Spacer(Modifier.height(10.dp))
+        Box(
+            Modifier.clip(RoundedCornerShape(10.dp)).background(if (cumBusy) C.dim else C.accentTint)
+                .clickable(enabled = !cumBusy) { if (!cumBusy) loadCumulative() }
+                .padding(horizontal = 18.dp, vertical = 10.dp),
+        ) {
+            Text(
+                if (cumBusy) "汇总中…" else "累计全部学期（GPA / 学分）",
+                color = if (cumBusy) C.onAccent else C.fg,
+                fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            )
+        }
+        if (cumNote.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(cumNote, fontSize = 12.sp, color = C.dim)
+        }
+        cum?.let { s ->
+            Spacer(Modifier.height(12.dp))
+            ScoreSummaryCard(title = "全部学期累计", sum = s)
+        }
+
         if (msg.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
             Text(msg, fontSize = 12.sp, color = C.danger)
         }
 
         rows?.let { list ->
+            Spacer(Modifier.height(12.dp))
+            ScoreSummaryCard(title = "$year-${year + 1} 年 ${termLabel(term)}", sum = summarize(list))
             Spacer(Modifier.height(12.dp))
             list.forEach { r ->
                 val n = r.cj.toDoubleOrNull()
@@ -281,6 +348,54 @@ fun ScoresPane(onClose: () -> Unit) {
             }
         }
         Spacer(Modifier.height(20.dp))
+    }
+}
+
+/**
+ * 成绩汇总卡：加权 GPA + 学分进度 + 分类小计。
+ * 只呈现算出来的数，并写明口径 —— 学校算法各校不同，这里不替它下结论。
+ */
+@Composable
+internal fun ScoreSummaryCard(title: String, sum: ScoreSummary) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(C.card)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(title, fontSize = 12.sp, color = C.dim)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                if (sum.gpa != null) fmt2(sum.gpa) else "—",
+                fontSize = 30.sp, fontWeight = FontWeight.Bold, color = C.accent,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("加权 GPA", fontSize = 12.sp, color = C.fgSub,
+                modifier = Modifier.padding(bottom = 6.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "共 ${sum.count} 门 · 学分 ${fmtCredit(sum.credits)} · 通过学分 ${fmtCredit(sum.passedCredits)}" +
+                if (sum.failedCount > 0) " · 不及格 ${sum.failedCount} 门" else "",
+            fontSize = 12.sp, color = if (sum.failedCount > 0) C.danger else C.fgSub,
+        )
+        Text("加权平均分 ${fmt2(sum.avg)}", fontSize = 12.sp, color = C.fgSub)
+        if (sum.byCategory.size > 1) {
+            Spacer(Modifier.height(8.dp))
+            sum.byCategory.forEach { c ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text(c.name, fontSize = 11.sp, color = C.fgSub, modifier = Modifier.weight(1f))
+                    Text(
+                        "${c.count} 门 · ${fmtCredit(c.credits)} 学分 · GPA ${fmt2(c.gpa)}",
+                        fontSize = 11.sp, color = C.dim,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "口径：绩点与学分按学校返回的数据直接加权，不是估算；学校没给绩点的课程（多为等级制）只计学分、不进 GPA。",
+            fontSize = 10.sp, color = C.dim,
+        )
     }
 }
 
