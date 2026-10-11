@@ -10,4 +10,5 @@
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_board"
     android:resizeMode="horizontal|vertical"
+    android:description="@string/widget_desc"
     android:widgetCategory="home_screen" />

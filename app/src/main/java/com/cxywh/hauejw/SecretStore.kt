@@ -135,19 +135,17 @@ object SecretStore {
     }
 
     /**
-     * 会话 Cookie（JSESSIONID 这类）也按账号加密存本机。
-     * 存的是会话标识不是密码，但同样按凭据对待：AES-GCM 加密，卸载/清数据即失效。
+     * 清掉老版本写下的会话 Cookie 密文（那时有内嵌网页直达功能，现在已无人读取）。
+     * 留着的唯一作用就是多一份落盘的凭据，清掉更干净。启动时调一次，幂等。
      */
-    fun saveSession(ctx: Context, account: String, cookie: String): Boolean =
-        account.isNotBlank() && put(ctx, account, K_SIV, K_SCT, cookie)
-
-    fun loadSession(ctx: Context, account: String): String? =
-        if (account.isBlank()) null else get(ctx, account, K_SIV, K_SCT)
-
-    fun clearSession(ctx: Context, account: String) {
-        if (account.isBlank()) return
+    fun purgeSessions(ctx: Context) {
         try {
-            sp(ctx).edit().remove(k(K_SIV, account)).remove(k(K_SCT, account)).commit()
+            val p = sp(ctx)
+            val stale = p.all.keys.filter { it.startsWith("$K_SIV@") || it.startsWith("$K_SCT@") }
+            if (stale.isEmpty()) return
+            val e = p.edit()
+            for (k in stale) e.remove(k)
+            e.commit()
         } catch (_: Exception) {
         }
     }

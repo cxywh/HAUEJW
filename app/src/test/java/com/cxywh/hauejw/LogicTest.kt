@@ -2,6 +2,7 @@ package com.cxywh.hauejw
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -295,15 +296,27 @@ class LogicTest {
 
     @Test
     fun scopedKey_不同账号的课表键必须不同() {
-        assertTrue(scopedKey("tt", "202310527108") != scopedKey("tt", "202212345678"))
-        assertEquals("tt@202310527108", scopedKey("tt", "202310527108"))
-        assertEquals("edits@202310527108", scopedKey("edits", "202310527108"))
+        assertTrue(scopedKey("tt", "202300000001") != scopedKey("tt", "202212345678"))
+        assertEquals("tt@202300000001", scopedKey("tt", "202300000001"))
+        assertEquals("edits@202300000001", scopedKey("edits", "202300000001"))
     }
 
     @Test
     fun scopedKey_未登录时用占位符不与其他账号相撞() {
         assertEquals("tt@_default", scopedKey("tt", ""))
         assertEquals("tt@_default", scopedKey("tt", "   "))
+    }
+
+    @Test
+    fun 账号私有数据的每一种键都必须按账号隔离() {
+        // 曾经漏掉 imported：A 导入的课表会串到 B 名下。清单钉在这里，以后加新键就不会忘。
+        assertTrue(ACCOUNT_SCOPED_KEYS.contains("imported"))
+        for (base in ACCOUNT_SCOPED_KEYS) {
+            val a = scopedKey(base, "202300000001")
+            val b = scopedKey(base, "202212345678")
+            assertNotEquals(a, b)
+            assertTrue(a.startsWith("$base@"))
+        }
     }
 
 }

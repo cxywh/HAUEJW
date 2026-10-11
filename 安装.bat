@@ -2,6 +2,11 @@
 chcp 65001 >nul
 title 安装教务助手到手机
 cd /d "%~dp0"
+
+rem 自动找 dist 里最新的 APK：不再写死版本号，免得每次发版都要改这个脚本
+set "APK="
+for /f "delims=" %%f in ('dir /b /o-d "dist\*.apk" 2^>nul') do if not defined APK set "APK=dist\%%f"
+
 set ADB=adb
 where adb >nul 2>&1 || set ADB=D:\platformtools\adb.exe
 
@@ -21,14 +26,21 @@ if not defined FOUND (
     echo.
     echo 请二选一：
     echo   1) 手机开发者选项里打开「USB 调试」，用数据线连电脑后重跑本脚本
-    echo   2) 用 LocalSend 把 dist\教务助手-1.0.0.apk 传到手机，在手机上点击安装
+    echo   2) 用 LocalSend 把 %APK% 传到手机，在手机上点击安装
     echo.
     pause
     exit /b
 )
 
-echo [安装中] dist\教务助手-1.0.0.apk
-"%ADB%" install -r "dist\教务助手-1.0.0.apk"
+if not defined APK (
+    echo [找不到 APK] 把安装包放到 dist\ 目录下再重跑本脚本
+    echo.
+    pause
+    exit /b
+)
+
+echo [安装中] %APK%
+"%ADB%" install -r "%APK%"
 if %errorlevel%==0 (
     echo.
     echo [完成] 正在启动...
