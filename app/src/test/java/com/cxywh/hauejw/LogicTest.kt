@@ -268,4 +268,29 @@ class LogicTest {
         assertEquals("/kwgl/kscx_cxXsksxxIndex.html?doType=query&gnmkdm=N358105", m["考试信息查询"])
     }
 
+    @Test
+    fun swipeWeek_向左滑下一周_向右滑上一周() {
+        assertEquals(6, swipeWeek(5, -80f, 56f, 20))
+        assertEquals(4, swipeWeek(5, 80f, 56f, 20))
+    }
+
+    @Test
+    fun swipeWeek_幅度不够不动() {
+        assertEquals(5, swipeWeek(5, -30f, 56f, 20))
+        assertEquals(5, swipeWeek(5, 30f, 56f, 20))
+    }
+
+    @Test
+    fun swipeWeek_首周与末周不被滑出去() {
+        assertEquals(1, swipeWeek(1, 80f, 56f, 20))
+        assertEquals(20, swipeWeek(20, -80f, 56f, 20))
+    }
+
+    @Test
+    fun mergeAccounts_按最近使用排序_多出的挂后面() {
+        assertEquals(listOf("b", "a", "c"), mergeAccounts(listOf("b", "a"), listOf("a", "c", "b")))
+        assertEquals(listOf("x"), mergeAccounts(listOf("x"), listOf("x")))
+        assertEquals(listOf("s1"), mergeAccounts(emptyList(), listOf("s1")))
+    }
+
 }

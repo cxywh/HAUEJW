@@ -17,6 +17,20 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("rememberUsername", true)
         set(v) = sp.edit().putBoolean("rememberUsername", v).apply()
 
+    /** 记住的账号清单（最近的排最前）。只存学号，不含任何密码信息；密码在 SecretStore 里加密存 */
+    var accounts: List<String>
+        get() = (sp.getString("accounts", "") ?: "").split("\n").map { it.trim() }.filter { it.isNotBlank() }
+        set(v) = sp.edit().putString("accounts", v.filter { it.isNotBlank() }.distinct().joinToString("\n")).apply()
+
+    fun addAccount(id: String) {
+        if (id.isBlank()) return
+        accounts = listOf(id) + accounts.filter { it != id }
+    }
+
+    fun removeAccount(id: String) {
+        accounts = accounts.filter { it != id }
+    }
+
     /** 是否记住密码（勾选后密码以 AES-GCM 加密存本机，密钥在系统密钥库；不勾选则从不落盘） */
     var rememberPassword: Boolean
         get() = sp.getBoolean("rememberPassword", false)
@@ -142,3 +156,10 @@ class Prefs(context: Context) {
         if (source == Source.IMPORTED) source = Source.SERVER
     }
 }
+
+/**
+ * 账号清单排序：以 Prefs 里的使用顺序为准（最近用的在前），
+ * SecretStore 里多出来的（迁移/异常残留）挂到后面，避免界面上账号顺序乱跳。
+ */
+internal fun mergeAccounts(order: List<String>, stored: List<String>): List<String> =
+    order.filter { it in stored } + stored.filterNot { it in order }
