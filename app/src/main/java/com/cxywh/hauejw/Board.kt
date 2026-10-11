@@ -538,6 +538,12 @@ internal fun BoardScreen(
         withContext(Dispatchers.IO) { Reminder.reschedule(ctx, tt, prefs) }
     }
 
+    // 课表 / 主题一变就刷新桌面小组件：小组件读的是同一份本地缓存，
+    // 这里只是让它"立刻"跟上，不必等半小时一次的兜底闹钟。
+    LaunchedEffect(tt, prefs.theme) {
+        HaueWidget.refresh(ctx)
+    }
+
     // 当前时间（每 30 秒刷新一次，用于「现在」指示线）
     val now by produceState(initialValue = LocalDateTime.now()) {
         while (true) { value = LocalDateTime.now(); delay(30_000) }
@@ -808,6 +814,7 @@ internal fun BoardScreen(
                 onWeeks = { pane = Pane.Weeks },
                 onChanges = { pane = Pane.Changes },
                 onRemind = { pane = Pane.Remind },
+                onWidget = { HaueWidget.pin(ctx) },
                 onAccounts = { pane = Pane.Accounts },
                 onLoginAgain = { pane = null; onLoginAgain() },
                 onLogout = { pane = null; onLogout() },

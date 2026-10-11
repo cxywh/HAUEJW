@@ -158,6 +158,7 @@ internal fun ToolsPane(
     onScores: () -> Unit,
     onExams: () -> Unit,
     onAccounts: () -> Unit,
+    onWidget: () -> Unit,
     onLoginAgain: () -> Unit, onLogout: () -> Unit, onClose: () -> Unit,
 ) {
     PaneShell(onClose) {
@@ -175,6 +176,7 @@ internal fun ToolsPane(
         RowItem("周次总览", onClick = onWeeks)
         RowItem("本地修改", onClick = onChanges)
         RowItem("课前提醒", onClick = onRemind)
+        RowItem("添加桌面小组件", "在桌面显示今天课表、下一节、距放假", onClick = onWidget)
         RowItem("切换账号", "多个账号各存各的课表", onClick = onAccounts)
         RowItem("重新登录", onClick = onLoginAgain)
         RowItem("退出登录并清除缓存", "本地修改会保留，可稍后撤销", danger = true, onClick = onLogout)

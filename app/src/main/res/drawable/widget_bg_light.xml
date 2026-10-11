@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 亮色底：实心卡片 + 圆角。颜色与 Theme.kt 的 Palettes.light.card 一致，改主题时两边一起改 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FCFDFF" />
+    <corners android:radius="20dp" />
+</shape>
