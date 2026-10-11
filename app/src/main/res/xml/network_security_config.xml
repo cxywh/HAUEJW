@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 教务系统为教育网 HTTP 明文站点，需显式放行该域名 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">124.system.haue.edu.cn</domain>
+        <domain includeSubdomains="true">haue.edu.cn</domain>
+        <domain includeSubdomains="true">125.219.48.23</domain>
+    </domain-config>
+</network-security-config>
