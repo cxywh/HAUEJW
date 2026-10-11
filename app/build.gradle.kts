@@ -21,7 +21,7 @@ android {
         applicationId = "com.cxywh.hauejw"
         minSdk = 26          // Android 8.0+（java.time 原生可用）
         targetSdk = 35
-        versionCode = 52
+        versionCode = 53
         versionName = "0.1.1"
     }
 

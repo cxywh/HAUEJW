@@ -688,12 +688,6 @@ internal fun BoardScreen(
                         .clickable { pane = Pane.Accounts }
                         .padding(horizontal = 9.dp, vertical = 5.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "⋯", fontSize = 20.sp, color = C.dim,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { pane = Pane.Tools }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                )
             }
 
             // ── 周次栏 ──
