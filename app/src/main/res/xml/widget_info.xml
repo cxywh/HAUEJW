@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   小组件声明。
-  updatePeriodMillis = 0：不交给系统的粗粒度自更新（最小 30 分钟且不可靠），
-  改由 Widget.kt 用闹钟刷新：每节课结束 / 下一节开始 / 跨天零点 / 每半小时兜底，
-  外加回声洞自己的换句闹钟（整句显示完停 5 秒）。
+  updatePeriodMillis = 1800000（系统最小值 30 分钟）：额外挂一条系统自己管的粗粒度刷新。
+  它不如自己的闹钟准，但它由系统的小组件服务排程，在应用被限制后台、自己的闹钟被掐掉时
+  更可能活下来 —— 两条路都通，总有一条能把内容推新。
   minWidth 180dp = Android 12 以下启动器的默认落位（4×2）；拖小到 2×2 靠 minResize* 放行。
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
@@ -13,7 +13,7 @@
     android:minResizeHeight="110dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_board"
     android:resizeMode="horizontal|vertical"
     android:description="@string/widget_desc"

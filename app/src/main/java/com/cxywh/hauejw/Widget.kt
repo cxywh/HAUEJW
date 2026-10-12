@@ -93,6 +93,9 @@ class HaueWidget : AppWidgetProvider() {
         private val refreshQueued = AtomicBoolean(false)
 
         private const val REQ_TICK = 7101
+
+        /** 心跳间隔：30 分钟。睡多久、被系统限制多久，醒来后至少还有它把整条链重新接上 */
+        private const val HEARTBEAT_MS = 30 * 60_000L
         private const val REQ_TAP = 7102
         private const val REQ_ECHO = 7103
         private const val REQ_KEY_BASE = 7200
@@ -257,6 +260,7 @@ class HaueWidget : AppWidgetProvider() {
                 reschedule(ctx, tt, now)
             }
             scheduleEcho(ctx, prefs, round)
+            scheduleHeartbeat(ctx, prefs)
 
             if (animateEcho && round != null && round.frames.size > 1) {
                 // 四帧里的最后一帧就是正片，所以不先推一次完整内容 —— 那一推立刻会被第一帧覆盖。
@@ -474,14 +478,8 @@ class HaueWidget : AppWidgetProvider() {
                 return
             }
 
-            runCatching {
-                am.setInexactRepeating(
-                    AlarmManager.RTC,
-                    System.currentTimeMillis() + 60_000L,
-                    AlarmManager.INTERVAL_HALF_HOUR,
-                    pi(ctx, ACTION_TICK, REQ_TICK),
-                )
-            }.onFailure { e -> Diag.record("HaueWidget.tick", e) }
+            // 兜底心跳不在这里排：reschedule 会被 lastReschedKey 跳过，而心跳必须每轮都续上，
+            // 见 scheduleHeartbeat()。这里只负责关键时刻那几条一次性闹钟。
 
             for (i in 0 until MAX_KEY) am.cancel(pi(ctx, ACTION_TICK, REQ_KEY_BASE + i))
 
@@ -514,6 +512,32 @@ class HaueWidget : AppWidgetProvider() {
                     pi(ctx, ACTION_ECHO, REQ_ECHO),
                 )
             }.onFailure { e -> Diag.record("HaueWidget.echoTick", e) }
+        }
+
+        /**
+         * 心跳闹钟：每 30 分钟醒一次，只干一件事 —— 把整条链重新拉起来（渲染会顺手重排关键闹钟和换句闹钟）。
+         *
+         * 为什么必须有它：其余闹钟全是非唤醒型（RTC），设备一睡着就不触发；系统再限制一下后台，
+         * 连闹钟都可能不发。原来靠一条 setInexactRepeating(RTC) 当兜底，睡久了就断在半路，
+         * 得开一次 App 才恢复。这里换成 RTC_WAKEUP + setAndAllowWhileIdle：打盹状态也能按维护窗口
+         * 醒来，醒来就把链接上。一天 48 次，代价可以忽略。
+         *
+         * 它必须每轮都排（和换句闹钟一样放在 lastReschedKey 判断之外），跳过一次就再没人续上。
+         */
+        private fun scheduleHeartbeat(ctx: Context, prefs: Prefs) {
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val p = pi(ctx, ACTION_TICK, REQ_TICK)
+            if (!prefs.widgetOn) {
+                am.cancel(p)
+                return
+            }
+            runCatching {
+                am.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + HEARTBEAT_MS,
+                    p,
+                )
+            }.onFailure { e -> Diag.record("HaueWidget.heartbeat", e) }
         }
 
         private fun oneShot(am: AlarmManager, ctx: Context, at: Long, req: Int) {

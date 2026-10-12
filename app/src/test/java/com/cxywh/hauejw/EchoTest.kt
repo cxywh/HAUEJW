@@ -208,4 +208,21 @@ class EchoTest {
         )
         assertEquals("回声洞", Echo.decode(gbk))
     }
+
+    @Test
+    fun `文件不在就写入包内默认内容`() {
+        assertEquals("“你好”;", Echo.seedContent(fileExists = false, default = "“你好”;"))
+    }
+
+    @Test
+    fun `文件已存在时不覆盖`() {
+        // 空文件也算「用户自己清空了」，不能拿默认内容盖回去
+        assertTrue(Echo.seedContent(fileExists = true, default = "“你好”;") == null)
+        assertTrue(Echo.seedContent(fileExists = true, default = "") == null)
+    }
+
+    @Test
+    fun `包内默认内容为空时不建文件`() {
+        assertTrue(Echo.seedContent(fileExists = false, default = "") == null)
+    }
 }

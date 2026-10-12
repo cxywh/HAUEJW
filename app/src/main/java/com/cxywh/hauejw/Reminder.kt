@@ -346,15 +346,19 @@ class RemindReceiver : BroadcastReceiver() {
     }
 }
 
-/** 开机 / 应用升级后重新武装闹钟（系统会清掉所有已排闹钟，不重排就永久失效） */
+/** 开机 / 升级 / 插拔电源后重新武装闹钟（系统会清掉已排闹钟，不重排就永久失效） */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
+            // 插拔电源是个白捡的恢复点：每天充电都会经过这里。系统把后台限制住、闹钟被掐掉之后，
+            // 这条能替用户把小组件的换句链重新接上，不用他专门开一次 App。
+            Intent.ACTION_POWER_CONNECTED,
+            Intent.ACTION_POWER_DISCONNECTED,
             -> {
                 Reminder.rearmFromPlan(context, Prefs(context))
-                // 开机 / 升级后闹钟会被系统清空，桌面上的小组件也停在旧内容上，一并刷新
+                // 闹钟被系统清空后小组件也停在旧内容上，一并刷新
                 HaueWidget.refresh(context)
             }
         }

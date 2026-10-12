@@ -69,6 +69,8 @@ internal fun Root(prefs: Prefs) {
     LaunchedEffect(Unit) {
         // 老版本把会话 Cookie 加密存过一份，现在已无人读取：顺手清掉，少一份落盘的凭据
         SecretStore.purgeSessions(ctx)
+        // 回声洞文件不在就先建出来（写的是包内默认内容）——装完即存在，用户自己用文件管理器就能改
+        Echo.ensureFile(ctx)
         if (prefs.username.isNotBlank()) {
             SecretStore.migrateLegacy(ctx, prefs.username)
             migrateSingleAccountData(ctx.getSharedPreferences("hauejw", android.content.Context.MODE_PRIVATE), prefs.username)

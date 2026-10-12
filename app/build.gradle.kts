@@ -21,8 +21,8 @@ android {
         applicationId = "com.cxywh.hauejw"
         minSdk = 26          // Android 8.0+（java.time 原生可用）
         targetSdk = 35
-        versionCode = 58
-        versionName = "0.2.1"
+        versionCode = 59
+        versionName = "0.2.2"
     }
 
     signingConfigs {
