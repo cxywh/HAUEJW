@@ -199,6 +199,16 @@ class HaueWidget : AppWidgetProvider() {
             }.onFailure { e -> Diag.record("HaueWidget.load", e) }.getOrNull()
 
             val p = C.byId(prefs.theme)
+            // 关掉小组件：撤掉全部闹钟，卡片上留一句「已关闭」，之后不再定时醒
+            if (!prefs.widgetOn) {
+                cancelAll(ctx)
+                val off = buildOff(ctx, p)
+                for (id in ids) {
+                    runCatching { mgr.updateAppWidget(id, off) }
+                        .onFailure { e -> Diag.record("HaueWidget.update", e) }
+                }
+                return
+            }
             // 内容与各尺寸的「该显示什么」都只算一次：下面每个实例、动画的每一帧都复用，不重复解课表
             val sm = smallState(tt, now)
             val round = echoRound(ctx, prefs, advanceEcho)
@@ -240,7 +250,7 @@ class HaueWidget : AppWidgetProvider() {
             st: WidgetState, sm: SmallState, round: EchoRound?,
             job: WidgetJob, frame: Int,
         ) {
-            val v = if (job.wDp < WIDE_MIN_DP) buildSmall(ctx, p, sm)
+            val v = if (widgetIsSmall(prefs.widgetForm, job.wDp, WIDE_MIN_DP)) buildSmall(ctx, p, sm)
             else buildWide(ctx, p, st, round, frame)
             runCatching { mgr.updateAppWidget(job.id, v) }
                 .onFailure { e -> Diag.record("HaueWidget.update", e) }
@@ -267,6 +277,22 @@ class HaueWidget : AppWidgetProvider() {
                     }.onFailure { e -> Diag.record("HaueWidget.burst", e) }
                 }, (f * Echo.FRAME_MS).toLong())
             }
+        }
+
+        /** 小组件被关掉时画的东西：用简版布局留一句说明，别让桌面留一块看不出状态的旧内容 */
+        private fun buildOff(ctx: Context, p: Palette): RemoteViews {
+            val v = RemoteViews(ctx.packageName, R.layout.widget_board_small)
+            v.setInt(R.id.w2_root, "setBackgroundResource", wBg(p))
+            v.setOnClickPendingIntent(R.id.w2_root, tapPi(ctx))
+
+            v.setTextViewText(R.id.w2_today, "小组件已关闭")
+            v.setTextColor(R.id.w2_today, wAccent(p))
+            v.setViewVisibility(R.id.w2_next_label, View.GONE)
+            v.setViewVisibility(R.id.w2_next_when, View.GONE)
+            v.setTextViewText(R.id.w2_next_name, "在「常用功能 → 桌面小组件」里重新打开")
+            v.setTextColor(R.id.w2_next_name, wDim(p))
+            v.setViewVisibility(R.id.w2_empty, View.GONE)
+            return v
         }
 
         /** 2x2 简版：只有「今天还剩几节」和「下一节」 */
@@ -442,7 +468,7 @@ class HaueWidget : AppWidgetProvider() {
         private fun scheduleEcho(ctx: Context, prefs: Prefs, round: EchoRound?) {
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             am.cancel(pi(ctx, ACTION_ECHO, REQ_ECHO))
-            if (!prefs.echoOn || round == null || !round.cyclable) return
+            if (!prefs.widgetOn || !prefs.echoOn || round == null || !round.cyclable) return
             runCatching {
                 am.set(
                     AlarmManager.RTC,

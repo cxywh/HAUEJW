@@ -2,6 +2,7 @@ package com.cxywh.hauejw
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -97,5 +98,27 @@ class WidgetSizeTest {
         val narrow = widgetState(tt(*cs.toTypedArray()), t(7), maxRows = 2)
         assertEquals(2, narrow.rows.size)
         assertTrue(narrow.rows.last().note)
+    }
+
+    // ───────────── 卡片形态：固定选一种 vs 按实际宽度 ─────────────
+
+    @Test
+    fun `设成自动时窄了走简版宽了走详细版`() {
+        assertTrue(widgetIsSmall("auto", 110, 180))
+        assertTrue(widgetIsSmall("auto", 179, 180))
+        assertFalse(widgetIsSmall("auto", 180, 180))
+        assertFalse(widgetIsSmall("auto", 250, 180))
+    }
+
+    @Test
+    fun `固定选了形态就不看实际宽度`() {
+        assertTrue(widgetIsSmall("small", 400, 180))
+        assertFalse(widgetIsSmall("wide", 110, 180))
+    }
+
+    @Test
+    fun `形态取值不认识时当自动处理`() {
+        assertTrue(widgetIsSmall("", 110, 180))
+        assertFalse(widgetIsSmall("AUTO", 250, 180))
     }
 }

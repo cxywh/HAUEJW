@@ -151,6 +151,59 @@ internal fun WeeksPane(maxWeek: Int, current: Int, todayWeek: Int?, prefs: Prefs
     }
 }
 
+// ─────────────────────── 常用功能：分组卡片 ───────────────────────
+
+/** 一张功能卡：标题 + 一句话说明，整块可点 */
+private data class Tool(
+    val title: String, val sub: String, val danger: Boolean = false, val onClick: () -> Unit,
+)
+
+@Composable
+private fun ToolCard(t: Tool, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (t.danger) C.dangerBg else C.card)
+            .border(1.dp, if (t.danger) Color.Transparent else C.cardBorder, RoundedCornerShape(12.dp))
+            .clickable { t.onClick() }
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+    ) {
+        Text(
+            t.title, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
+            color = if (t.danger) C.danger else C.fg,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            t.sub, fontSize = 11.sp, color = C.dim,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 15.sp,
+        )
+    }
+}
+
+/** 两列铺卡片；一组里剩单张时让它占满整行，别在右边留一块空 */
+@Composable
+private fun ToolGrid(items: List<Tool>) {
+    items.chunked(2).forEach { row ->
+        Row(Modifier.fillMaxWidth()) {
+            ToolCard(row[0], Modifier.weight(1f))
+            if (row.size > 1) {
+                Spacer(Modifier.width(8.dp))
+                ToolCard(row[1], Modifier.weight(1f))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun GroupLabel(text: String) {
+    Text(
+        text, fontSize = 11.5.sp, color = C.dim,
+        modifier = Modifier.padding(start = 2.dp, top = 14.dp, bottom = 7.dp),
+    )
+}
+
 @Composable
 internal fun ToolsPane(
     onTheme: () -> Unit, onWeeks: () -> Unit, onChanges: () -> Unit, onRemind: () -> Unit,
@@ -163,34 +216,108 @@ internal fun ToolsPane(
 ) {
     PaneShell(onClose) {
         PaneTitle("常用功能", onClose)
-        Spacer(Modifier.height(4.dp))
-        RowItem(
-            "我的成绩",
-            onClick = onScores,
+
+        GroupLabel("学习")
+        ToolGrid(
+            listOf(
+                Tool("我的成绩", "GPA、学分、成绩明细", onClick = onScores),
+                Tool("考试信息", "时间、地点、座位", onClick = onExams),
+                Tool("周次总览", "整学期每周怎么排", onClick = onWeeks),
+                Tool("本地修改", "改课名、去掉某次课", onClick = onChanges),
+                Tool("课前提醒", "提前多久、怎么提醒", onClick = onRemind),
+            )
         )
-        RowItem(
-            "考试信息",
-            onClick = onExams,
+
+        GroupLabel("桌面")
+        ToolGrid(
+            listOf(
+                Tool("桌面小组件", "开关、形态、添加", onClick = onWidget),
+                Tool("回声洞", "底部那句话、编辑内容", onClick = onEcho),
+            )
         )
-        RowItem("外观主题", "亮色 / 暗色", onClick = onTheme)
-        RowItem("周次总览", onClick = onWeeks)
-        RowItem("本地修改", onClick = onChanges)
-        RowItem("课前提醒", onClick = onRemind)
-        RowItem("添加桌面小组件", "在桌面显示今天课表、下一节、距放假", onClick = onWidget)
-        RowItem("回声洞", "在小组件底部显示自定义语句", onClick = onEcho)
-        RowItem("切换账号", "多个账号各存各的课表", onClick = onAccounts)
-        RowItem("重新登录", onClick = onLoginAgain)
-        RowItem("退出登录并清除缓存", "本地修改会保留，可稍后撤销", danger = true, onClick = onLogout)
+
+        GroupLabel("账号与外观")
+        ToolGrid(
+            listOf(
+                Tool("外观主题", "浅色、深色", onClick = onTheme),
+                Tool("切换账号", "多个账号各存各的", onClick = onAccounts),
+                Tool("重新登录", "清掉登录态再登一次", onClick = onLoginAgain),
+                Tool("退出并清除缓存", "本地修改会保留", danger = true, onClick = onLogout),
+            )
+        )
     }
 }
 
+// ─────────────────────── 桌面小组件 ───────────────────────
+
 @Composable
-internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
+internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(prefs.widgetOn) }
+    var form by remember { mutableStateOf(prefs.widgetForm) }
+    val forms = listOf("auto" to "自动", "wide" to "4×2 详细", "small" to "2×2 简版")
+
+    PaneShell(onClose) {
+        PaneTitle("桌面小组件", onClose)
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("启用小组件", fontSize = 13.5.sp, color = C.fg)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = on,
+                onCheckedChange = { v ->
+                    on = v
+                    prefs.widgetOn = v
+                    HaueWidget.refresh(ctx)
+                },
+            )
+        }
+        Text(
+            "关掉后不再定时刷新，卡片上显示「已关闭」；桌面上那一块要移除，请在桌面长按它。",
+            fontSize = 11.sp, color = C.dim,
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Text("卡片形态", fontSize = 13.5.sp, color = C.fg)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            forms.forEach { (id, label) ->
+                Chip(label, form == id) {
+                    form = id
+                    prefs.widgetForm = id
+                    HaueWidget.refresh(ctx)
+                }
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+        Text(
+            "「自动」按桌面上实际拖出来的宽度选画法：窄了走简版，宽了走详细版。" +
+                "固定选一种就照那种画，不看实际宽度。桌面上的大小只能长按拖动改。",
+            fontSize = 11.sp, color = C.dim,
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Button(
+            onClick = { HaueWidget.pin(ctx) },
+            colors = appButtonColors(),
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+        ) { Text("添加到桌面") }
+        Spacer(Modifier.height(5.dp))
+        Text("桌面上没有它时点这里，系统会弹出添加面板。", fontSize = 11.sp, color = C.dim)
+
+        Spacer(Modifier.height(12.dp))
+        RowItem("回声洞", "小组件底部那句话：开关与内容编辑", onClick = onEcho)
+    }
+}
+
+// ─────────────────────── 回声洞：设置 ───────────────────────
+
+@Composable
+internal fun EchoPane(prefs: Prefs, onEdit: () -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     var on by remember { mutableStateOf(prefs.echoOn) }
-    var text by remember { mutableStateOf(Echo.readRaw(ctx)) }
     var note by remember { mutableStateOf<String?>(null) }
-    val list = remember(text) { Echo.parse(text) }
+    val count = remember { Echo.parse(Echo.readRaw(ctx)).size }
 
     PaneShell(onClose) {
         PaneTitle("回声洞", onClose)
@@ -209,15 +336,52 @@ internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
                 },
             )
         }
+        Text("小组件总开关关着时也不显示（在「桌面小组件」里）。", fontSize = 11.sp, color = C.dim)
 
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "给它的时间是这样分配的：先播约半秒的故障动画，整句显示完整后停 5 秒，然后换下一条。" +
-                "长句子会自动缩小字号，尽量让你在卡片上整句读完；把小组件拖高一点，能放的字号更大。",
-            fontSize = 11.5.sp, color = C.dim,
+        Spacer(Modifier.height(14.dp))
+        RowItem(
+            "编辑内容",
+            if (count == 0) "现在一句都识别不出来" else "已识别 $count 句",
+            onClick = onEdit,
         )
 
         Spacer(Modifier.height(8.dp))
+        Text(
+            "换句节奏：先播约半秒的故障动画，整句显示完整后停 5 秒，然后换下一条。" +
+                "长句子会自动缩小字号，把小组件拖高一点能放更大的字。",
+            fontSize = 11.5.sp, color = C.dim,
+        )
+
+        Spacer(Modifier.height(10.dp))
+        TextButton(
+            onClick = { HaueWidget.echoNow(ctx); note = "已让小组件换一条（会播一次故障动画）" },
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+        ) { Text("立刻换一条", color = C.accent) }
+        note?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, fontSize = 11.5.sp, color = C.okFg)
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "文件位置（也可以用文件管理器直接改）：\nAndroid/data/com.cxywh.hauejw/files/" + Echo.FILE_NAME,
+            fontSize = 10.5.sp, color = C.dim,
+        )
+    }
+}
+
+// ─────────────────────── 回声洞：内容编辑 ───────────────────────
+
+@Composable
+internal fun EchoEditorPane(onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var text by remember { mutableStateOf(Echo.readRaw(ctx)) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val list = remember(text) { Echo.parse(text) }
+
+    PaneShell(onClose) {
+        PaneTitle("编辑回声洞内容", onClose)
+
         Text(
             "写法：\"要显示的内容\";   引号里才是正文，分号或换行断句。\n" +
                 "中英文引号和分号都认，也认「」；整句一个引号都没写就整句照显。",
@@ -228,7 +392,7 @@ internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
         OutlinedTextField(
             value = text, onValueChange = { text = it },
             label = { Text("jwzs.txt") },
-            minLines = 6, maxLines = 12,
+            minLines = 10, maxLines = 18,
             colors = appFieldColors(),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -250,7 +414,7 @@ internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
             Button(
                 onClick = {
                     Echo.save(ctx, text)
-                    note = "已保存，小组件马上生效"
+                    note = "已保存，小组件马上换用新内容"
                     HaueWidget.refresh(ctx)
                 },
                 colors = appButtonColors(),
@@ -268,17 +432,6 @@ internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
                 modifier = Modifier.weight(1f).height(44.dp),
             ) { Text("恢复默认", color = C.dim) }
         }
-        Spacer(Modifier.height(2.dp))
-        TextButton(
-            onClick = { HaueWidget.echoNow(ctx); note = "已让小组件换一条（会播一次故障动画）" },
-            modifier = Modifier.fillMaxWidth().height(44.dp),
-        ) { Text("立刻换一条", color = C.accent) }
-
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "文件位置（也可以用文件管理器直接改）：\nAndroid/data/com.cxywh.hauejw/files/" + Echo.FILE_NAME,
-            fontSize = 10.5.sp, color = C.dim,
-        )
     }
 }
 
