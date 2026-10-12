@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -159,6 +158,7 @@ internal fun ToolsPane(
     onExams: () -> Unit,
     onAccounts: () -> Unit,
     onWidget: () -> Unit,
+    onEcho: () -> Unit,
     onLoginAgain: () -> Unit, onLogout: () -> Unit, onClose: () -> Unit,
 ) {
     PaneShell(onClose) {
@@ -177,9 +177,108 @@ internal fun ToolsPane(
         RowItem("本地修改", onClick = onChanges)
         RowItem("课前提醒", onClick = onRemind)
         RowItem("添加桌面小组件", "在桌面显示今天课表、下一节、距放假", onClick = onWidget)
+        RowItem("回声洞", "在小组件底部显示自定义语句", onClick = onEcho)
         RowItem("切换账号", "多个账号各存各的课表", onClick = onAccounts)
         RowItem("重新登录", onClick = onLoginAgain)
         RowItem("退出登录并清除缓存", "本地修改会保留，可稍后撤销", danger = true, onClick = onLogout)
+    }
+}
+
+@Composable
+internal fun EchoPane(prefs: Prefs, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(prefs.echoOn) }
+    var text by remember { mutableStateOf(Echo.readRaw(ctx)) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val list = remember(text) { Echo.parse(text) }
+
+    PaneShell(onClose) {
+        PaneTitle("回声洞", onClose)
+        Text("在课表小组件底部单独占一块，轮流显示你自己写的话。", fontSize = 11.5.sp, color = C.dim)
+        Spacer(Modifier.height(10.dp))
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("显示回声洞", fontSize = 13.5.sp, color = C.fg)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = on,
+                onCheckedChange = { v ->
+                    on = v
+                    prefs.echoOn = v
+                    HaueWidget.refresh(ctx)
+                },
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "给它的时间是这样分配的：先播约半秒的故障动画，整句显示完整后停 5 秒，然后换下一条。" +
+                "长句子会自动缩小字号，尽量让你在卡片上整句读完；把小组件拖高一点，能放的字号更大。",
+            fontSize = 11.5.sp, color = C.dim,
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "写法：\"要显示的内容\";   引号里才是正文，分号或换行断句。\n" +
+                "中英文引号和分号都认，也认「」；整句一个引号都没写就整句照显。",
+            fontSize = 11.sp, color = C.dim,
+        )
+        Spacer(Modifier.height(10.dp))
+
+        OutlinedTextField(
+            value = text, onValueChange = { text = it },
+            label = { Text("jwzs.txt") },
+            minLines = 6, maxLines = 12,
+            colors = appFieldColors(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (list.isEmpty()) "现在一句也识别不出来" else "已识别 ${list.size} 句",
+            fontSize = 11.5.sp, color = if (list.isEmpty()) C.warnFg else C.dim,
+        )
+        list.take(2).forEach { s ->
+            Text("· " + s, fontSize = 11.sp, color = C.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        note?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, fontSize = 11.5.sp, color = C.okFg)
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row {
+            Button(
+                onClick = {
+                    Echo.save(ctx, text)
+                    note = "已保存，小组件马上生效"
+                    HaueWidget.refresh(ctx)
+                },
+                colors = appButtonColors(),
+                modifier = Modifier.weight(1f).height(44.dp),
+            ) { Text("保存") }
+            Spacer(Modifier.width(10.dp))
+            TextButton(
+                onClick = {
+                    val d = Echo.defaultText(ctx)
+                    Echo.save(ctx, d)
+                    text = d
+                    note = "已恢复成默认内容"
+                    HaueWidget.refresh(ctx)
+                },
+                modifier = Modifier.weight(1f).height(44.dp),
+            ) { Text("恢复默认", color = C.dim) }
+        }
+        Spacer(Modifier.height(2.dp))
+        TextButton(
+            onClick = { HaueWidget.echoNow(ctx); note = "已让小组件换一条（会播一次故障动画）" },
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+        ) { Text("立刻换一条", color = C.accent) }
+
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "文件位置（也可以用文件管理器直接改）：\nAndroid/data/com.cxywh.hauejw/files/" + Echo.FILE_NAME,
+            fontSize = 10.5.sp, color = C.dim,
+        )
     }
 }
 

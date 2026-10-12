@@ -504,6 +504,7 @@ internal sealed interface Pane {
     data object Changes : Pane
     data object Theme : Pane
     data object Menus : Pane
+    data object Echo : Pane
     data class Detail(val course: Course) : Pane
     data class EditMenu(val course: Course) : Pane
     data class Rename(val course: Course) : Pane
@@ -820,6 +821,7 @@ internal fun BoardScreen(
                 onChanges = { pane = Pane.Changes },
                 onRemind = { pane = Pane.Remind },
                 onWidget = { HaueWidget.pin(ctx) },
+                onEcho = { pane = Pane.Echo },
                 onAccounts = { pane = Pane.Accounts },
                 onLoginAgain = { pane = null; onLoginAgain() },
                 onLogout = { pane = null; onLogout() },
@@ -848,7 +850,17 @@ internal fun BoardScreen(
             is Pane.Remind -> RemindPane(prefs, tt) { pane = null }
             is Pane.AllCourses -> AllCoursesPane(tt) { pane = null }
             is Pane.Menus -> MenusPane(prefs.menus) { pane = null }
-            is Pane.Theme -> ThemePane(prefs, onPick = { id -> prefs.theme = id; C.palette = C.byId(id) }, onClose = { pane = null })
+            is Pane.Theme -> ThemePane(
+                prefs,
+                onPick = { id ->
+                    prefs.theme = id
+                    C.palette = C.byId(id)
+                    // 小组件的颜色是渲染时现取的，得推它一把才会跟着换
+                    HaueWidget.refresh(ctx)
+                },
+                onClose = { pane = null },
+            )
+            is Pane.Echo -> EchoPane(prefs) { pane = null; HaueWidget.refresh(ctx) }
             is Pane.Accounts -> AccountPane(
                 prefs = prefs,
                 current = tt.student.id.ifBlank { prefs.username },

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x2 简版：同一个课表组件被拖窄到 2 列时用这一套（见 Widget.kt 按宽度分支）。
+  只留两件事 —— 今天还剩几节、下一节是什么；周次和学期进度放不下就不显示。
+  颜色一律由 Widget.kt 运行时按主题注入，这里只留结构与字号。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w2_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg_light">
+
+    <!-- 今天还剩 N 节：这块是 2x2 的主信息 -->
+    <TextView
+        android:id="@+id/w2_today"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13.5sp"
+        android:textStyle="bold"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:text="今天还剩 0 节" />
+
+    <TextView
+        android:id="@+id/w2_next_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:textSize="9.5sp"
+        android:maxLines="1"
+        android:text="下一节" />
+
+    <TextView
+        android:id="@+id/w2_next_when"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textSize="11.5sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="" />
+
+    <!-- 课名可能很长：给它吃掉余下的高度，字号自动缩到放得下为止 -->
+    <TextView
+        android:id="@+id/w2_next_name"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="top"
+        android:textSize="12.5sp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:autoSizeTextType="uniform"
+        android:autoSizeMinTextSize="8sp"
+        android:autoSizeMaxTextSize="12.5sp"
+        android:autoSizeStepGranularity="1sp"
+        android:text="" />
+
+    <!-- 还没有课表时顶上来的一段说明 -->
+    <TextView
+        android:id="@+id/w2_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="11sp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:visibility="gone"
+        android:text="" />
+</LinearLayout>

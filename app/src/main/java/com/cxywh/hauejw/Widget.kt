@@ -8,6 +8,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -16,60 +20,69 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.util.Random
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 桌面小组件：今天课表 + 下一节课 + 学期进度/距放假 + 今天还剩几节。
+ * 桌面小组件：今天课表 + 下一节课 + 学期进度/距放假 + 今天还剩几节，下面按开关挂一块「回声洞」。
  *
  * 数据全部来自 [Prefs] 的本地缓存（loadBase + 本地修改），所以
  * **不需要联网、也不需要 App 在后台运行** —— 这正是它和「打开 App 才能看」的本质区别。
  *
- * 颜色取的是 Theme.kt 里 Palettes 的同一批值（用 Color.toArgb() 转成 RemoteViews 能吃的 int），
- * 不另抄一份十六进制 —— 抄一份迟早会和主题对不上。
+ * 同一个组件两种形态，取决于实例当前尺寸（一个拖成 2x2、另一个拖成 4x2 是常态）：
+ * 宽 < [WIDE_MIN_DP] 走 2x2 简版（只剩「今天还剩几节」和「下一节」），否则走详细版。
  */
 class HaueWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
-        // goAsync：onUpdate 跑在主线程，而解析课表 JSON 是要花时间的，不能让主线程等。
-        // 渲染统一交给 worker 串行执行，免得这里和 App 侧 refresh 同时改同一批 RemoteViews。
-        val pending = goAsync()
-        val app = context.applicationContext
-        worker.execute {
-            try {
-                renderAndSchedule(app)
-            } catch (e: Exception) {
-                Diag.record("HaueWidget.onUpdate", e)
-            } finally {
-                runCatching { pending.finish() }
-            }
-        }
+        // 系统拉起 / 重新添加：顺手播一次故障动画，刚放上去就有「开机」的感觉
+        runAsync(context, "HaueWidget.onUpdate", animateEcho = true, advanceEcho = false)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == ACTION_TICK) {
-            val pending = goAsync()
-            val app = context.applicationContext
-            worker.execute {
-                try {
-                    renderAndSchedule(app)
-                } catch (e: Exception) {
-                    Diag.record("HaueWidget.onTick", e)
-                } finally {
-                    runCatching { pending.finish() }
-                }
-            }
+        when (intent.action) {
+            ACTION_TICK -> runAsync(context, "HaueWidget.onTick", animateEcho = false, advanceEcho = false)
+            ACTION_ECHO -> runAsync(context, "HaueWidget.onEcho", animateEcho = true, advanceEcho = true)
         }
+    }
+
+    /** 被拖大拖小：布局形态跟着换，必须重画 */
+    override fun onAppWidgetOptionsChanged(
+        context: Context, manager: AppWidgetManager, id: Int, newOptions: Bundle,
+    ) {
+        refresh(context)
     }
 
     override fun onEnabled(context: Context) = refresh(context)
 
     override fun onDisabled(context: Context) = cancelAll(context)
 
+    /**
+     * 广播回调跑在主线程，而解课表 JSON、读 jwzs.txt 都要花时间，不能让主线程等：
+     * 统一丢给 worker 串行执行，用 goAsync 撑住这次广播的生命周期。
+     */
+    private fun runAsync(ctx: Context, tag: String, animateEcho: Boolean, advanceEcho: Boolean) {
+        val pending = goAsync()
+        val app = ctx.applicationContext
+        worker.execute {
+            try {
+                renderAndSchedule(app, animateEcho, advanceEcho)
+            } catch (e: Exception) {
+                Diag.record(tag, e)
+            } finally {
+                runCatching { pending.finish() }
+            }
+        }
+    }
+
     companion object {
 
+        private const val TAG = "HaueWidget"
+
         const val ACTION_TICK = "com.cxywh.hauejw.WIDGET_TICK"
+        const val ACTION_ECHO = "com.cxywh.hauejw.WIDGET_ECHO"
 
         /** 渲染串行走这一个线程：系统的 onUpdate/onTick 与 App 侧 refresh 不会同时改同一批 RemoteViews */
         private val worker = Executors.newSingleThreadExecutor { r ->
@@ -81,13 +94,23 @@ class HaueWidget : AppWidgetProvider() {
 
         private const val REQ_TICK = 7101
         private const val REQ_TAP = 7102
+        private const val REQ_ECHO = 7103
         private const val REQ_KEY_BASE = 7200
         private const val MAX_KEY = 12
+
+        /** 窄于这个宽度就用 2x2 简版（2 列约 110dp，4 列约 250dp，中间留足余量） */
+        private const val WIDE_MIN_DP = 180
+
+        /** 详细版里回声洞的四帧正文。RemoteViews 只能整块替换，所以每帧都要重画整份 */
+        private val ECHO_BODY = intArrayOf(R.id.w_echo_t0, R.id.w_echo_t1, R.id.w_echo_t2, R.id.w_echo_t3)
 
         private val ROWS = intArrayOf(R.id.w_row0, R.id.w_row1, R.id.w_row2, R.id.w_row3)
         private val TIMES = intArrayOf(R.id.w_t0, R.id.w_t1, R.id.w_t2, R.id.w_t3)
         private val NAMES = intArrayOf(R.id.w_c0, R.id.w_c1, R.id.w_c2, R.id.w_c3)
         private val ROOMS = intArrayOf(R.id.w_r0, R.id.w_r1, R.id.w_r2, R.id.w_r3)
+
+        /** 上次记过日志的尺寸：只在尺寸/开关变化时打一行，免得刷屏 */
+        private var lastSizeLog = ""
 
         // ── 小组件配色：直接用 Theme.kt 的 Palettes，不再手抄十六进制 ──
         // 背景是带圆角的 shape drawable（RemoteViews 没法在运行时补圆角），它的两个底色
@@ -97,6 +120,7 @@ class HaueWidget : AppWidgetProvider() {
         private fun wSub(p: Palette) = p.fgSub.toArgb()
         private fun wDim(p: Palette) = p.dim.toArgb()
         private fun wAccent(p: Palette) = p.accent.toArgb()
+        private fun wLine(p: Palette) = p.line.toArgb()
 
         /**
          * 请系统弹出「把小组件添加到桌面」的确认框（Android 8.0+ 的 requestPinAppWidget）。
@@ -120,7 +144,7 @@ class HaueWidget : AppWidgetProvider() {
         }
 
         /**
-         * App 侧数据一变（登录 / 切账号 / 退出 / 更新课表 / 改过课 / 换主题）就调它。
+         * App 侧数据一变（登录 / 切账号 / 退出 / 更新课表 / 改过课 / 换主题 / 改回声洞）就调它。
          * 内部串行 + 合并，连着调也不会排出一队渲染，可以直接调。
          */
         fun refresh(ctx: Context) {
@@ -129,17 +153,44 @@ class HaueWidget : AppWidgetProvider() {
             worker.execute {
                 // 先放开再渲染：渲染期间来的新变化会再排一次，最后状态一定画得上
                 refreshQueued.set(false)
-                runCatching { renderAndSchedule(app) }
+                runCatching { renderAndSchedule(app, animateEcho = false, advanceEcho = false) }
                     .onFailure { e -> Diag.record("HaueWidget.refresh", e) }
             }
         }
 
+        /**
+         * 立刻换一条回声洞（设置面板的「立刻换一条」按钮用）。
+         * 走的是和定时器同一条广播，所以会一起播故障动画。
+         */
+        fun echoNow(ctx: Context) {
+            val app = ctx.applicationContext
+            runCatching { app.sendBroadcast(Intent(app, HaueWidget::class.java).setAction(ACTION_ECHO)) }
+                .onFailure { e -> Diag.record("HaueWidget.echoNow", e) }
+        }
+
         // ────────────────────────── 渲染 ──────────────────────────
 
-        private fun renderAndSchedule(ctx: Context) {
+        /** 一个小组件实例 + 它当前的尺寸（同一个 App 的多个实例尺寸可以不一样） */
+        private data class WidgetJob(val id: Int, val wDp: Int, val hDp: Int)
+
+        /**
+         * 这一轮回声洞要显示的内容：正文 + 四帧 + 要不要播动画。
+         * cyclable = 文件里真有句子可轮换 —— 空文件只显示一句提示，那就别再排下一次换句了。
+         */
+        private data class EchoRound(
+            val text: String,
+            val frames: List<String>,
+            val animate: Boolean,
+            val cyclable: Boolean,
+        )
+
+        private fun renderAndSchedule(ctx: Context, animateEcho: Boolean, advanceEcho: Boolean) {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, HaueWidget::class.java))
-            if (ids.isEmpty()) return
+            if (ids.isEmpty()) {
+                cancelAll(ctx)
+                return
+            }
 
             val prefs = Prefs(ctx)
             val now = LocalDateTime.now()
@@ -147,16 +198,101 @@ class HaueWidget : AppWidgetProvider() {
                 prefs.loadBase()?.let { base -> base.withCourses(prefs.edits.apply(base.courses)) }
             }.onFailure { e -> Diag.record("HaueWidget.load", e) }.getOrNull()
 
-            for (id in ids) {
-                runCatching { mgr.updateAppWidget(id, build(ctx, prefs, tt, now)) }
-                    .onFailure { e -> Diag.record("HaueWidget.update", e) }
-            }
+            val p = C.byId(prefs.theme)
+            // 内容与各尺寸的「该显示什么」都只算一次：下面每个实例、动画的每一帧都复用，不重复解课表
+            val sm = smallState(tt, now)
+            val round = echoRound(ctx, prefs, advanceEcho)
+            val jobs = ids.map { id -> jobOf(mgr, id) }
+            val stByHeight = jobs.map { it.hDp }.distinct()
+                .associateWith { h -> widgetState(tt, now, widgetRowsFor(h, round != null)) }
+
+            logSizes(jobs, prefs.echoOn)
+
             reschedule(ctx, tt, now)
+            scheduleEcho(ctx, prefs, round)
+
+            if (animateEcho && round != null && round.frames.size > 1) {
+                // 四帧里的最后一帧就是正片，所以不先推一次完整内容 —— 那一推立刻会被第一帧覆盖。
+                burst(ctx, mgr, prefs, p, stByHeight, sm, round, jobs)
+            } else {
+                // 不播动画的场合（半小时兜底、拖尺寸、换主题）：必须推一次，否则屏幕上还是旧的
+                for (j in jobs) push(ctx, mgr, prefs, p, stByHeight.getValue(j.hDp), sm, round, j, frame = ECHO_BODY.size - 1)
+            }
         }
 
-        private fun build(ctx: Context, prefs: Prefs, tt: Timetable?, now: LocalDateTime): RemoteViews {
-            val p = C.byId(prefs.theme)
-            val st = widgetState(tt, now)
+        private fun jobOf(mgr: AppWidgetManager, id: Int): WidgetJob {
+            val opt = runCatching { mgr.getAppWidgetOptions(id) }.getOrNull()
+            val w = opt?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 250
+            val h = opt?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 110
+            return WidgetJob(id, w, h)
+        }
+
+        /** 尺寸变化时记一行：排查「拖窄了没换成简版」这类问题时，先看这行知道自己拿到的是多少 dp */
+        private fun logSizes(jobs: List<WidgetJob>, echoOn: Boolean) {
+            val key = jobs.joinToString("|") { "${it.wDp}x${it.hDp}" } + " echo=" + echoOn
+            if (key == lastSizeLog) return
+            lastSizeLog = key
+            Log.i(TAG, "尺寸 " + key)
+        }
+
+        private fun push(
+            ctx: Context, mgr: AppWidgetManager, prefs: Prefs, p: Palette,
+            st: WidgetState, sm: SmallState, round: EchoRound?,
+            job: WidgetJob, frame: Int,
+        ) {
+            val v = if (job.wDp < WIDE_MIN_DP) buildSmall(ctx, p, sm)
+            else buildWide(ctx, p, st, round, frame)
+            runCatching { mgr.updateAppWidget(job.id, v) }
+                .onFailure { e -> Diag.record("HaueWidget.update", e) }
+        }
+
+        /**
+         * 故障动画：连着推四帧（乱码 → 再乱一次 → 整块糊掉 → 正片）。
+         * 每帧都得是一份完整的 RemoteViews（updateAppWidget 是整块替换，改不了单块），
+         * 所以内容在外面算好传进来，这里只重画、不重算。
+         * RemoteViews 自带的动画能力很弱，能做「机器故障」观感的就是这个组合：
+         * 正文换成乱码 + ViewFlipper 的进/出动画（res/anim/echo_in、echo_out）。
+         */
+        private fun burst(
+            ctx: Context, mgr: AppWidgetManager, prefs: Prefs, p: Palette,
+            stByHeight: Map<Int, WidgetState>, sm: SmallState, round: EchoRound, jobs: List<WidgetJob>,
+        ) {
+            val h = Handler(Looper.getMainLooper())
+            for (f in round.frames.indices) {
+                h.postDelayed({
+                    runCatching {
+                        for (j in jobs) {
+                            push(ctx, mgr, prefs, p, stByHeight.getValue(j.hDp), sm, round, j, frame = f)
+                        }
+                    }.onFailure { e -> Diag.record("HaueWidget.burst", e) }
+                }, (f * Echo.FRAME_MS).toLong())
+            }
+        }
+
+        /** 2x2 简版：只有「今天还剩几节」和「下一节」 */
+        private fun buildSmall(ctx: Context, p: Palette, sm: SmallState): RemoteViews {
+            val v = RemoteViews(ctx.packageName, R.layout.widget_board_small)
+            v.setInt(R.id.w2_root, "setBackgroundResource", wBg(p))
+            v.setOnClickPendingIntent(R.id.w2_root, tapPi(ctx))
+
+            v.setTextViewText(R.id.w2_today, sm.today)
+            v.setTextColor(R.id.w2_today, wAccent(p))
+            v.setTextViewText(R.id.w2_next_label, "下一节")
+            v.setTextColor(R.id.w2_next_label, wDim(p))
+            v.setTextViewText(R.id.w2_next_when, sm.nextWhen)
+            v.setTextColor(R.id.w2_next_when, wSub(p))
+            v.setTextViewText(R.id.w2_next_name, sm.nextName)
+            v.setTextColor(R.id.w2_next_name, wFg(p))
+
+            v.setTextViewText(R.id.w2_empty, sm.empty ?: "")
+            v.setViewVisibility(R.id.w2_empty, if (sm.empty != null) View.VISIBLE else View.GONE)
+            return v
+        }
+
+        /** 详细版：课表 + 学期进度 + 下一节，底部按开关挂一块回声洞 */
+        private fun buildWide(
+            ctx: Context, p: Palette, st: WidgetState, round: EchoRound?, frame: Int,
+        ): RemoteViews {
             val v = RemoteViews(ctx.packageName, R.layout.widget_board)
             v.setInt(R.id.w_root, "setBackgroundResource", wBg(p))
             v.setOnClickPendingIntent(R.id.w_root, tapPi(ctx))
@@ -204,7 +340,56 @@ class HaueWidget : AppWidgetProvider() {
             v.setTextViewText(R.id.w_next, st.next)
             v.setTextColor(R.id.w_next, wSub(p))
 
+            if (round == null) {
+                v.setViewVisibility(R.id.w_echo_line, View.GONE)
+                v.setViewVisibility(R.id.w_echo_block, View.GONE)
+            } else {
+                v.setViewVisibility(R.id.w_echo_line, View.VISIBLE)
+                v.setInt(R.id.w_echo_line, "setBackgroundColor", wLine(p))
+                v.setViewVisibility(R.id.w_echo_block, View.VISIBLE)
+                v.setTextViewText(R.id.w_echo_label, ctx.getString(R.string.echo_label))
+                v.setTextColor(R.id.w_echo_label, wDim(p))
+                val f = frame.coerceIn(0, round.frames.size - 1)
+                round.frames.forEachIndexed { i, s ->
+                    v.setTextViewText(ECHO_BODY[i], s)
+                    v.setTextColor(ECHO_BODY[i], wSub(p))
+                }
+                v.setInt(R.id.w_echo_flip, "setDisplayedChild", f)
+            }
             return v
+        }
+
+        /** 取这一轮回声洞的正文与四帧；关着就是 null。advance = 到点了，换下一句 */
+        private fun echoRound(ctx: Context, prefs: Prefs, advance: Boolean): EchoRound? {
+            if (!prefs.echoOn) return null
+            val texts = runCatching { Echo.load(ctx) }
+                .onFailure { e -> Diag.record("HaueWidget.echo", e) }
+                .getOrDefault(emptyList())
+
+            if (texts.isEmpty()) {
+                val hint = ctx.getString(R.string.echo_no_content)
+                return EchoRound(hint, List(ECHO_BODY.size) { hint }, animate = false, cyclable = false)
+            }
+
+            val rnd = Random()
+            var text = prefs.echoShown?.takeIf { it.isNotBlank() }
+            var animate = false
+            // 该换句了：advance 是真到点了；text 为空、或已不在文件里（用户改了 jwzs.txt）也要重挑
+            if (advance || text == null || text !in texts) {
+                val q = prefs.echoQueue.split(",").mapNotNull { it.trim().toIntOrNull() }
+                val r = Echo.pick(texts.size, q, prefs.echoPos, texts, text, rnd)
+                if (r.index in texts.indices) {
+                    text = texts[r.index]
+                    prefs.echoQueue = r.queue.joinToString(",")
+                    prefs.echoPos = r.pos
+                    prefs.echoShown = text
+                    animate = advance
+                }
+            }
+            val t = text ?: return null
+            // 帧数不能超过布局里的正文槽位（ECHO_BODY 有几个用几个）；帧数又反过来决定换句节奏，
+            // 所以以后想加帧，只需在这里和布局里各加一处，节奏会自动跟着变
+            return EchoRound(t, Echo.frames(t, rnd).take(ECHO_BODY.size), animate, cyclable = true)
         }
 
         // ────────────────────────── 刷新调度 ──────────────────────────
@@ -221,7 +406,7 @@ class HaueWidget : AppWidgetProvider() {
             // 没有课表（没登录 / 刚退出登录）：闹钟全撤掉，别让它每半小时白醒一次。
             // 数据回来时 App 侧会调 refresh()，那时重新武装。
             if (tt == null) {
-                cancelAll(ctx)
+                cancelTickAlarms(ctx)
                 return
             }
 
@@ -248,6 +433,25 @@ class HaueWidget : AppWidgetProvider() {
                 .forEachIndexed { i, t -> oneShot(am, ctx, t, REQ_KEY_BASE + i) }
         }
 
+        /**
+         * 回声洞的换句闹钟：整句完整显示之后再停 5 秒，换下一条 —— 不是按固定间隔刷新。
+         * 每次渲染都重排一次（cancel + set），所以闹钟被系统吞掉、进程被杀、重启手机之后
+         * 都能在下一次任何触发里自己接上，不会断在半路。
+         * 用 RTC 而不是 RTC_WAKEUP：屏幕黑着没人看这块，等设备下一次醒来再换就行 —— 不叫醒设备。
+         */
+        private fun scheduleEcho(ctx: Context, prefs: Prefs, round: EchoRound?) {
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.cancel(pi(ctx, ACTION_ECHO, REQ_ECHO))
+            if (!prefs.echoOn || round == null || !round.cyclable) return
+            runCatching {
+                am.set(
+                    AlarmManager.RTC,
+                    System.currentTimeMillis() + Echo.nextEchoInMs(round.frames.size),
+                    pi(ctx, ACTION_ECHO, REQ_ECHO),
+                )
+            }.onFailure { e -> Diag.record("HaueWidget.echoTick", e) }
+        }
+
         private fun oneShot(am: AlarmManager, ctx: Context, at: Long, req: Int) {
             val p = pi(ctx, ACTION_TICK, req)
             val exact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
@@ -257,10 +461,16 @@ class HaueWidget : AppWidgetProvider() {
             }.onFailure { e -> Diag.record("HaueWidget.oneShot", e) }
         }
 
-        private fun cancelAll(ctx: Context) {
+        private fun cancelTickAlarms(ctx: Context) {
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             am.cancel(pi(ctx, ACTION_TICK, REQ_TICK))
             for (i in 0 until MAX_KEY) am.cancel(pi(ctx, ACTION_TICK, REQ_KEY_BASE + i))
+        }
+
+        private fun cancelAll(ctx: Context) {
+            cancelTickAlarms(ctx)
+            val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.cancel(pi(ctx, ACTION_ECHO, REQ_ECHO))
         }
 
         private fun atMillis(date: LocalDate, time: LocalTime): Long =

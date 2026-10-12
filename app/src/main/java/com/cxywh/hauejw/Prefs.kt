@@ -111,6 +111,28 @@ class Prefs(context: Context) {
         get() = sp.getString("remindPlan", null)
         set(v) = sp.edit().putString("remindPlan", v).apply()
 
+    // ── 回声洞：小组件底部那块自定义文字 ──
+    // 存的都是"轮到哪一句了"，和课表数据无关，所以不按账号分（换个账号看同一批句子更合理）。
+
+    /** 是否在小组件里显示回声洞（默认打开：这是新功能的可见入口，不想要在设置里一键关） */
+    var echoOn: Boolean
+        get() = sp.getBoolean("echoOn", true)
+        set(v) = sp.edit().putBoolean("echoOn", v).apply()
+
+    /** 已洗好的显示顺序（本轮内保证不重复）；pos 走到头就重洗换下一轮 */
+    var echoQueue: String
+        get() = sp.getString("echoQueue", "") ?: ""
+        set(v) = sp.edit().putString("echoQueue", v).apply()
+
+    var echoPos: Int
+        get() = sp.getInt("echoPos", 0)
+        set(v) = sp.edit().putInt("echoPos", v).apply()
+
+    /** 上一句的正文：重洗时避开它，免得连着两条一模一样 */
+    var echoShown: String?
+        get() = sp.getString("echoShown", null)
+        set(v) = sp.edit().putString("echoShown", v).apply()
+
     val edits: EditLayer get() = EditLayer.fromJson(editsJson)
 
     fun saveEdits(layer: EditLayer) {

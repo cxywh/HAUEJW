@@ -3,4 +3,8 @@
     <string name="app_name">教务助手</string>
     <!-- 小组件在桌面「添加小组件」列表里显示的说明 -->
     <string name="widget_desc">今天课表 · 下一节课 · 学期进度</string>
+    <!-- 小组件里回声洞那一块的标题 -->
+    <string name="echo_label">回声洞</string>
+    <!-- 没有能显示的句子时，回声洞那块显示的提示 -->
+    <string name="echo_no_content">jwzs.txt 里还没有能显示的句子</string>
 </resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  回声洞「退出」：快速淡掉并往右闪一下。
+  故意做得又短又硬（70ms、线性），这样连播四帧时是「闪断」而不是「渐隐」——
+  渐变会让整段看起来像普通的换字动画，就没了机器故障的味道。
+-->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:anim/linear_interpolator">
+    <alpha
+        android:duration="70"
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0" />
+    <translate
+        android:duration="70"
+        android:fromXDelta="0"
+        android:toXDelta="2.5%" />
+</set>
