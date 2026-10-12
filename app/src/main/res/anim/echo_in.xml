@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  回声洞「稳定」帧的进场：从暗、略偏左、略小 → 亮、归位。
+  观感上是「信号回来了」，和前面几帧的乱码连起来就是一次机器故障。
+  ViewFlipper 只有一对进出动画，所以故障帧之间的切换也走它 ——
+  时长刻意压到 200ms 以内，连播时看起来就是闪，而不是慢慢淡入。
+-->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:anim/decelerate_interpolator">
+    <alpha
+        android:duration="170"
+        android:fromAlpha="0.20"
+        android:toAlpha="1.0" />
+    <translate
+        android:duration="170"
+        android:fromXDelta="-2.5%"
+        android:toXDelta="0" />
+    <scale
+        android:duration="170"
+        android:fromXScale="0.985"
+        android:toXScale="1.0"
+        android:fromYScale="1.0"
+        android:toYScale="1.0"
+        android:pivotX="0%"
+        android:pivotY="50%" />
+</set>
