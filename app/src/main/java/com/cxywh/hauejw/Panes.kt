@@ -250,11 +250,24 @@ internal fun ToolsPane(
 
 // ─────────────────────── 桌面小组件 ───────────────────────
 
+/** 渲染时记下的实际尺寸（"320x165|110x110"，dp）→ 给人看的一句话；空串返回 null */
+private fun sizeText(raw: String): String? {
+    val pairs = raw.split("|").mapNotNull { s ->
+        val p = s.split("x")
+        val w = p.getOrNull(0)?.toIntOrNull()
+        val h = p.getOrNull(1)?.toIntOrNull()
+        if (w != null && h != null) "${(w + 30) / 70}×${(h + 30) / 70} 格" to "$w×$h dp" else null
+    }
+    if (pairs.isEmpty()) return null
+    return "桌面上的卡片现在是 " + pairs.joinToString("、") { it.first + "（约 " + it.second + "）" }
+}
+
 @Composable
 internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     var on by remember { mutableStateOf(prefs.widgetOn) }
     var form by remember { mutableStateOf(prefs.widgetForm) }
+    var sizeHint by remember { mutableStateOf(sizeText(prefs.lastWidgetSize)) }
     val forms = listOf("auto" to "自动", "wide" to "4×2 详细", "small" to "2×2 简版")
 
     PaneShell(onClose) {
@@ -278,21 +291,29 @@ internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
         )
 
         Spacer(Modifier.height(14.dp))
-        Text("卡片形态", fontSize = 13.5.sp, color = C.fg)
+        Text("卡片画法", fontSize = 13.5.sp, color = C.fg)
+        sizeHint?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, fontSize = 11.5.sp, color = C.dim)
+        }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             forms.forEach { (id, label) ->
                 Chip(label, form == id) {
                     form = id
                     prefs.widgetForm = id
+                    // 顺手请桌面把尺寸也调过去：实测华为 / 荣耀不认，AOSP 桌面会照办
+                    HaueWidget.resize(ctx, id)
                     HaueWidget.refresh(ctx)
+                    sizeHint = sizeText(prefs.lastWidgetSize)
                 }
                 Spacer(Modifier.width(6.dp))
             }
         }
         Text(
-            "「自动」按桌面上实际拖出来的宽度选画法：窄了走简版，宽了走详细版。" +
-                "固定选一种就照那种画，不看实际宽度。桌面上的大小只能长按拖动改。",
+            "「自动」跟着桌面上的实际宽度走：窄到 2 格就自动变简版。" +
+                "想改桌面那块的大小，长按卡片拖它的边或角——系统不给应用这个权限，只能手拖；" +
+                "拖成 2 格后，「自动」会跟着换成简版。",
             fontSize = 11.sp, color = C.dim,
         )
 

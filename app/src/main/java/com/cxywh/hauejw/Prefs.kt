@@ -129,6 +129,15 @@ class Prefs(context: Context) {
         get() = sp.getString("widgetForm", "auto") ?: "auto"
         set(v) = sp.edit().putString("widgetForm", v).apply()
 
+    /**
+     * 最近一次渲染时各实例的实际尺寸（"宽x高|宽x高"，dp），由渲染路径写入。
+     * 设置面板显示「桌面那张现在几格」读的就是它 —— 和画卡片用的是同一份数据，
+     * 不会像 getAppWidgetOptions 那样读到已卸载实例的残留值。
+     */
+    var lastWidgetSize: String
+        get() = sp.getString("lastWidgetSize", "") ?: ""
+        set(v) = sp.edit().putString("lastWidgetSize", v).apply()
+
     /** 已洗好的显示顺序（本轮内保证不重复）；pos 走到头就重洗换下一轮 */
     var echoQueue: String
         get() = sp.getString("echoQueue", "") ?: ""
