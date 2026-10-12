@@ -90,7 +90,22 @@ object Echo {
     }
 
     /**
-     * 保存用户内容。超过 [MAX_FILE_BYTES] 时按 UTF-8 字节截断——和读取端用同一个上限、
+     * 用户文件不存在时该往里面写什么：写入包内默认内容，让文件一装上就在那儿，
+     * 用户拿文件管理器、同步工具都能直接看到和改。
+     * 已经存在（哪怕是空文件）返回 null —— 空文件是「用户自己清空了」，不能拿默认内容盖回去。
+     */
+    fun seedContent(fileExists: Boolean, default: String): String? =
+        if (fileExists || default.isEmpty()) null else default
+
+    /** 文件不在就按默认内容建一个；返回是否真的建了 */
+    fun ensureFile(ctx: Context): Boolean {
+        if (file(ctx).exists()) return false
+        val seed = seedContent(fileExists = false, defaultText(ctx)) ?: return false
+        save(ctx, seed)
+        return file(ctx).isFile
+    }
+
+     /** 保存用户内容。超过 [MAX_FILE_BYTES] 时按 UTF-8 字节截断——和读取端用同一个上限、
      * 同一套「别截在半个字上」的处理。返回是否截过：读取端有上限而写入端没有，
      * 用户会以为存进去了、其实尾巴永远读不回来。
      */

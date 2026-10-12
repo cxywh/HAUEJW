@@ -63,7 +63,9 @@ import java.time.LocalDateTime
 @Composable
 internal fun PaneShell(onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-    Box(Modifier.fillMaxSize()) {
+    // 让开键盘：窗口已被系统按输入法高度缩过，但输入法自己画的圆角与阴影还会再压住底边约 41px
+    // （实测：面板底边 1548，输入法可见上沿 1507）。面板本身永远贴着底部，直接留出这段余量。
+    Box(Modifier.fillMaxSize().imePadding().padding(bottom = 20.dp)) {
         Box(Modifier.fillMaxSize().background(Color(0x66000000)).clickable { onClose() })
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
@@ -405,6 +407,9 @@ internal fun EchoEditorPane(onClose: () -> Unit) {
     var note by remember { mutableStateOf<String?>(null) }
     val list = remember(text) { Echo.parse(text) }
 
+    // 文件不在（装完还没保存过）就先按包内默认内容建出来，用户去文件管理器能直接找到它
+    LaunchedEffect(Unit) { Echo.ensureFile(ctx) }
+
     PaneShell(onClose) {
         PaneTitle("编辑回声洞内容", onClose)
 
@@ -418,9 +423,11 @@ internal fun EchoEditorPane(onClose: () -> Unit) {
         OutlinedTextField(
             value = text, onValueChange = { text = it },
             label = { Text("jwzs.txt") },
-            minLines = 10, maxLines = 18,
+            // 收在 8~12 行：键盘弹起时框里的字、「已识别 N 句」和保存按钮能一起留在键盘上方，
+            // 边改边看得见（整块面板会随键盘上移）；再多就靠框内自己滚
+            minLines = 8, maxLines = 12,
             colors = appFieldColors(),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 300.dp),
         )
         Spacer(Modifier.height(6.dp))
         Text(
