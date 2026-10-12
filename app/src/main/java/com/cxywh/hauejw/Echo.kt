@@ -89,11 +89,24 @@ object Echo {
         return if (b.size - (end - 1) >= need) b else b.copyOf(end - 1)
     }
 
-    fun save(ctx: Context, text: String) {
+    /**
+     * 保存用户内容。超过 [MAX_FILE_BYTES] 时按 UTF-8 字节截断——和读取端用同一个上限、
+     * 同一套「别截在半个字上」的处理。返回是否截过：读取端有上限而写入端没有，
+     * 用户会以为存进去了、其实尾巴永远读不回来。
+     */
+    fun save(ctx: Context, text: String): Boolean {
+        var s = text
+        var cut = false
+        val bytes = s.toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_FILE_BYTES) {
+            s = decode(trimPartialUtf8(bytes.copyOf(MAX_FILE_BYTES)))
+            cut = true
+        }
         runCatching {
             ctx.getExternalFilesDir(null)?.mkdirs()
-            file(ctx).writeBytes(text.toByteArray(Charsets.UTF_8))
+            file(ctx).writeBytes(s.toByteArray(Charsets.UTF_8))
         }.onFailure { e -> Diag.record("Echo.save", e) }
+        return cut
     }
 
     /** 解析好的语句列表 */

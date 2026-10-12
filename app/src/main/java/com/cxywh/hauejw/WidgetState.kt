@@ -191,3 +191,11 @@ fun widgetIsSmall(form: String, widthDp: Int, wideMinDp: Int): Boolean = when (f
     "wide" -> false
     else -> widthDp < wideMinDp
 }
+
+/**
+ * 桌面格 ↔ dp 的换算：格数 ≈ (dp + 30) / 70（安卓桌面的老公式，各厂商略有出入）。
+ * 小组件声明里的尺寸、想请启动器调整的尺寸、面板上显示的格数，全从这里算，别各写一份。
+ */
+fun cellsToDp(cells: Int): Int = cells * 70 - 30
+
+fun dpToCells(dp: Int): Int = ((dp + 30) / 70).coerceAtLeast(1)
