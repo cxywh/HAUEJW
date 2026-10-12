@@ -256,11 +256,18 @@ private fun sizeText(raw: String): String? {
         val p = s.split("x")
         val w = p.getOrNull(0)?.toIntOrNull()
         val h = p.getOrNull(1)?.toIntOrNull()
-        if (w != null && h != null) "${(w + 30) / 70}×${(h + 30) / 70} 格" to "$w×$h dp" else null
+        if (w != null && h != null) "${dpToCells(w)}×${dpToCells(h)} 格" to "$w×$h dp" else null
     }
     if (pairs.isEmpty()) return null
     return "桌面上的卡片现在是 " + pairs.joinToString("、") { it.first + "（约 " + it.second + "）" }
 }
+
+/** 卡片画法选项：id、显示名、要请桌面调成的格宽（0 = 不动桌面上的尺寸，只换画法） */
+private val WIDGET_FORMS = listOf(
+    Triple("auto", "自动", 0),
+    Triple("wide", "4×2 详细", 4),
+    Triple("small", "2×2 简版", 2),
+)
 
 @Composable
 internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
@@ -268,7 +275,6 @@ internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
     var on by remember { mutableStateOf(prefs.widgetOn) }
     var form by remember { mutableStateOf(prefs.widgetForm) }
     var sizeHint by remember { mutableStateOf(sizeText(prefs.lastWidgetSize)) }
-    val forms = listOf("auto" to "自动", "wide" to "4×2 详细", "small" to "2×2 简版")
 
     PaneShell(onClose) {
         PaneTitle("桌面小组件", onClose)
@@ -298,12 +304,11 @@ internal fun WidgetPane(prefs: Prefs, onEcho: () -> Unit, onClose: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            forms.forEach { (id, label) ->
+            WIDGET_FORMS.forEach { (id, label, cells) ->
                 Chip(label, form == id) {
                     form = id
                     prefs.widgetForm = id
-                    // 顺手请桌面把尺寸也调过去：实测华为 / 荣耀不认，AOSP 桌面会照办
-                    HaueWidget.resize(ctx, id)
+                    HaueWidget.resize(ctx, cells) // 顺手请桌面调尺寸；「自动」是 0，不动它
                     HaueWidget.refresh(ctx)
                     sizeHint = sizeText(prefs.lastWidgetSize)
                 }
@@ -434,8 +439,8 @@ internal fun EchoEditorPane(onClose: () -> Unit) {
         Row {
             Button(
                 onClick = {
-                    Echo.save(ctx, text)
-                    note = "已保存，小组件马上换用新内容"
+                    val cut = Echo.save(ctx, text)
+                    note = if (cut) "已保存（超出上限的部分被截掉了）" else "已保存，小组件马上换用新内容"
                     HaueWidget.refresh(ctx)
                 },
                 colors = appButtonColors(),

@@ -121,4 +121,27 @@ class WidgetSizeTest {
         assertTrue(widgetIsSmall("", 110, 180))
         assertFalse(widgetIsSmall("AUTO", 250, 180))
     }
+
+    // ───────────── 格数 ↔ dp 换算 ─────────────
+
+    @Test
+    fun `格数与dp来回换算对得上`() {
+        // 真机实测：4×2 的卡桌面给的是 250×110 dp
+        assertEquals(250, cellsToDp(4))
+        assertEquals(110, cellsToDp(2))
+        assertEquals(4, dpToCells(250))
+        assertEquals(2, dpToCells(110))
+        // 1~6 格来回转一圈都要还原
+        for (c in 1..6) assertEquals(c, dpToCells(cellsToDp(c)))
+        // 桌面给得比格宽略大时（含内边距）也要落在同一格上
+        assertEquals(4, dpToCells(280))
+        assertEquals(2, dpToCells(120))
+    }
+
+    @Test
+    fun `格数至少是一`() {
+        assertEquals(1, dpToCells(0))
+        assertEquals(1, dpToCells(-5))
+        assertEquals(1, dpToCells(40))
+    }
 }
