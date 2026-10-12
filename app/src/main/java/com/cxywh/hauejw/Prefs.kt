@@ -119,6 +119,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("echoOn", true)
         set(v) = sp.edit().putBoolean("echoOn", v).apply()
 
+    /** 是否启用桌面小组件（默认开）：关掉后撤掉全部闹钟、卡片显示「已关闭」，不再定时醒 */
+    var widgetOn: Boolean
+        get() = sp.getBoolean("widgetOn", true)
+        set(v) = sp.edit().putBoolean("widgetOn", v).apply()
+
+    /** 卡片形态：auto 按桌面实际宽度决定，wide 固定详细版，small 固定简版 */
+    var widgetForm: String
+        get() = sp.getString("widgetForm", "auto") ?: "auto"
+        set(v) = sp.edit().putString("widgetForm", v).apply()
+
     /** 已洗好的显示顺序（本轮内保证不重复）；pos 走到头就重洗换下一轮 */
     var echoQueue: String
         get() = sp.getString("echoQueue", "") ?: ""

@@ -181,3 +181,13 @@ fun smallState(tt: Timetable?, now: LocalDateTime): SmallState {
         empty = null,
     )
 }
+
+/**
+ * 卡片按哪种画法：设置里固定选了 wide / small 就听它的，选 auto 才看桌面给的实际宽度。
+ * 纯函数，跟 widgetRowsFor 一样能被单测钉住（取值不认识时当 auto 处理）。
+ */
+fun widgetIsSmall(form: String, widthDp: Int, wideMinDp: Int): Boolean = when (form) {
+    "small" -> true
+    "wide" -> false
+    else -> widthDp < wideMinDp
+}

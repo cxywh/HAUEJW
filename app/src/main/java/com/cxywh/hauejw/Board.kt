@@ -505,6 +505,8 @@ internal sealed interface Pane {
     data object Theme : Pane
     data object Menus : Pane
     data object Echo : Pane
+    data object EchoEditor : Pane
+    data object Widget : Pane
     data class Detail(val course: Course) : Pane
     data class EditMenu(val course: Course) : Pane
     data class Rename(val course: Course) : Pane
@@ -820,7 +822,7 @@ internal fun BoardScreen(
                 onWeeks = { pane = Pane.Weeks },
                 onChanges = { pane = Pane.Changes },
                 onRemind = { pane = Pane.Remind },
-                onWidget = { HaueWidget.pin(ctx) },
+                onWidget = { pane = Pane.Widget },
                 onEcho = { pane = Pane.Echo },
                 onAccounts = { pane = Pane.Accounts },
                 onLoginAgain = { pane = null; onLoginAgain() },
@@ -860,7 +862,16 @@ internal fun BoardScreen(
                 },
                 onClose = { pane = null },
             )
-            is Pane.Echo -> EchoPane(prefs) { pane = null; HaueWidget.refresh(ctx) }
+            is Pane.Widget -> WidgetPane(
+                prefs = prefs,
+                onEcho = { pane = Pane.Echo },
+                onClose = { pane = null; HaueWidget.refresh(ctx) },
+            )
+            is Pane.Echo -> EchoPane(
+                prefs = prefs,
+                onEdit = { pane = Pane.EchoEditor },
+            ) { pane = null; HaueWidget.refresh(ctx) }
+            is Pane.EchoEditor -> EchoEditorPane { pane = null; HaueWidget.refresh(ctx) }
             is Pane.Accounts -> AccountPane(
                 prefs = prefs,
                 current = tt.student.id.ifBlank { prefs.username },
