@@ -158,6 +158,37 @@ class HaueWidget : AppWidgetProvider() {
             }
         }
 
+        /** 格数 → dp 的换算：格数 ≈ (dp + 30) / 70，所以 2 格 = 110dp、4 格 = 250dp */
+        private const val SMALL_W_DP = 110
+        private const val WIDE_W_DP = 250
+        private const val BOX_H_DP = 110
+
+        /**
+         * 请求启动器把桌面上的那一块改成对应格数。
+         *
+         * 安卓没有「应用直接改小组件尺寸」的公开接口，唯一沾边的是 updateAppWidgetOptions：
+         * 把 min/max 宽高（dp）交给启动器，由它决定要不要照着调。AOSP 桌面会照办，
+         * 部分厂商桌面（含华为 / 荣耀）会忽略 —— 所以调用方不能假定成功，
+         * 改完看日志里的「尺寸 WxH」才是实情（那是回读 getAppWidgetOptions 的结果）。
+         */
+        fun resize(ctx: Context, form: String) {
+            val app = ctx.applicationContext
+            runCatching {
+                val mgr = AppWidgetManager.getInstance(app)
+                val ids = mgr.getAppWidgetIds(ComponentName(app, HaueWidget::class.java))
+                if (ids.isEmpty()) return
+                val w = if (form == "small") SMALL_W_DP else WIDE_W_DP
+                val o = Bundle().apply {
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, w)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, w)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, BOX_H_DP)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, BOX_H_DP)
+                }
+                for (id in ids) mgr.updateAppWidgetOptions(id, o)
+                Log.i(TAG, "请求改尺寸 form=$form → ${w}x${BOX_H_DP} dp")
+            }.onFailure { e -> Diag.record("HaueWidget.resize", e) }
+        }
+
         /**
          * 立刻换一条回声洞（设置面板的「立刻换一条」按钮用）。
          * 走的是和定时器同一条广播，所以会一起播故障动画。
@@ -216,7 +247,7 @@ class HaueWidget : AppWidgetProvider() {
             val stByHeight = jobs.map { it.hDp }.distinct()
                 .associateWith { h -> widgetState(tt, now, widgetRowsFor(h, round != null)) }
 
-            logSizes(jobs, prefs.echoOn)
+            logSizes(jobs, prefs)
 
             reschedule(ctx, tt, now)
             scheduleEcho(ctx, prefs, round)
@@ -237,12 +268,13 @@ class HaueWidget : AppWidgetProvider() {
             return WidgetJob(id, w, h)
         }
 
-        /** 尺寸变化时记一行：排查「拖窄了没换成简版」这类问题时，先看这行知道自己拿到的是多少 dp */
-        private fun logSizes(jobs: List<WidgetJob>, echoOn: Boolean) {
-            val key = jobs.joinToString("|") { "${it.wDp}x${it.hDp}" } + " echo=" + echoOn
+        /** 尺寸变化时记一行并存下来：排查「拖窄了没换成简版」先看这行；设置面板显示的也是这份 */
+        private fun logSizes(jobs: List<WidgetJob>, prefs: Prefs) {
+            val key = jobs.joinToString("|") { "${it.wDp}x${it.hDp}" }
             if (key == lastSizeLog) return
             lastSizeLog = key
-            Log.i(TAG, "尺寸 " + key)
+            Log.i(TAG, "尺寸 " + key + " echo=" + prefs.echoOn)
+            prefs.lastWidgetSize = key
         }
 
         private fun push(
