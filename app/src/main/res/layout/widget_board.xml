@@ -53,6 +53,17 @@
         android:ellipsize="end"
         android:text="" />
 
+    <!-- 电费：本机缓存的电量读数，紧跟在距放假那行下面；没查过/没登录时由 Widget.kt 写字样 -->
+    <TextView
+        android:id="@+id/w_fee"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:textSize="11sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="" />
+
     <!-- 今天还剩 N 节 -->
     <TextView
         android:id="@+id/w_today"
@@ -232,17 +243,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="7dp"
-        android:textSize="11sp"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:text="" />
-
-    <!-- 电费：本机缓存的电量读数；没查过/没登录时由 Widget.kt 写字样 -->
-    <TextView
-        android:id="@+id/w_fee"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
         android:textSize="11sp"
         android:maxLines="1"
         android:ellipsize="end"
