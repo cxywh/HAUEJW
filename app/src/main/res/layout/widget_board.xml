@@ -42,27 +42,35 @@
             android:text="" />
     </LinearLayout>
 
-    <!-- 学期进度 / 距放假 -->
-    <TextView
-        android:id="@+id/w_term"
+    <!-- 学期进度 / 距放假 ····· 电费（排在同一行，电费靠右） -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="3dp"
-        android:textSize="11sp"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:text="" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-    <!-- 电费：本机缓存的电量读数，紧跟在距放假那行下面；没查过/没登录时由 Widget.kt 写字样 -->
-    <TextView
-        android:id="@+id/w_fee"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:textSize="11sp"
-        android:maxLines="1"
-        android:ellipsize="end"
-        android:text="" />
+        <TextView
+            android:id="@+id/w_term"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="" />
+
+        <!-- 电费：本机缓存的电量读数；没查过/没登录时由 Widget.kt 写字样 -->
+        <TextView
+            android:id="@+id/w_fee"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="" />
+    </LinearLayout>
 
     <!-- 今天还剩 N 节 -->
     <TextView
