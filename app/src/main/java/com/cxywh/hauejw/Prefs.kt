@@ -77,6 +77,16 @@ class Prefs(context: Context, private val fixedAccount: String? = null) {
         set(v) = sp.edit().putString(key("card_item"), v).apply()
 
     /** 电费房间的可读名字，形如 某校区某号楼 A区1层 101 */
+    /** 下次该查电费的时刻；进程被杀重启后据此判断有没有漏查 */
+    var cardNextAt: Long
+        get() = sp.getLong(key("card_next_at"), 0L)
+        set(v) = sp.edit().putLong(key("card_next_at"), v).apply()
+
+    /** 看门狗闹钟上次排的时刻，全局一份（不分账号） */
+    var watchArmedAt: Long
+        get() = sp.getLong("card_watch_at", 0L)
+        set(v) = sp.edit().putLong("card_watch_at", v).apply()
+
     var cardRoomName: String
         get() = sp.getString(key("card_room_name"), "") ?: ""
         set(v) = sp.edit().putString(key("card_room_name"), v).apply()

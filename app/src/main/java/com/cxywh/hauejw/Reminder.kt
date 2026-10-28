@@ -361,6 +361,9 @@ class BootReceiver : BroadcastReceiver() {
                 val p = Prefs(context)
                 Reminder.rearmFromPlan(context, p)
                 CardWatch.syncAll(context)
+                // 开机后闹钟全被清空，看门狗重新挂上
+                p.watchArmedAt = 0L
+                CardWatch.ensureWatchdog(context)
                 // 闹钟被系统清空后小组件也停在旧内容上，一并刷新
                 HaueWidget.refresh(context)
             }

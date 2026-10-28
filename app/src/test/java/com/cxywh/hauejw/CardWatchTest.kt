@@ -123,4 +123,24 @@ class CardWatchTest {
         assertTrue(scopedKey("card_room", "202300000001") != scopedKey("card_room", "202300000002"))
         assertEquals("card_room@202300000001", scopedKey("card_room", "202300000001"))
     }
+
+    @Test
+    fun 补查_过了预定时刻十分钟才补() {
+        val next = at(2026, 10, 28, 8, 0)
+        assertTrue(CardWatch.shouldCatchUp(true, next, next + 20 * 60_000L, 10))
+        assertTrue(!CardWatch.shouldCatchUp(true, next, next + 5 * 60_000L, 10))
+        assertTrue(!CardWatch.shouldCatchUp(false, next, next + 20 * 60_000L, 10))
+        assertTrue(!CardWatch.shouldCatchUp(true, 0L, next + 20 * 60_000L, 10))
+    }
+
+    @Test
+    fun 补查_禁查时段不补() {
+        val next = at(2026, 10, 28, 8, 0)
+        val now = next + 5L * 3600_000L     // 13:00
+        assertTrue(!CardWatch.shouldCatchUp(true, next, now, 23))
+        assertTrue(!CardWatch.shouldCatchUp(true, next, now, 0))
+        assertTrue(!CardWatch.shouldCatchUp(true, next, now, 2))
+        assertTrue(CardWatch.shouldCatchUp(true, next, now, 3))
+        assertTrue(CardWatch.shouldCatchUp(true, next, now, 22))
+    }
 }

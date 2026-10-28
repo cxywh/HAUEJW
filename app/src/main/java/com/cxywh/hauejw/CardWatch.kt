@@ -29,6 +29,8 @@ object CardWatch {
 
     /** 请求码区间与提醒（71xx）、心跳（72xx）分开 */
     private const val REQ_BASE = 0x73010000.toInt()
+    private const val REQ_WATCH = 0x73030000.toInt()
+    const val ACTION_WATCH = "com.cxywh.hauejw.CARD_WATCH"
     private const val NOTE_BASE = 0x73020000.toInt()
     private const val CH_ID = "card_warn"
     private const val QUIET_FROM = 23
@@ -79,8 +81,12 @@ object CardWatch {
         am.cancel(pi)
         if (account.isBlank()) return
         val p = Prefs(ctx, account)
-        if (!p.cardAutoOn) return
+        if (!p.cardAutoOn) {
+            p.cardNextAt = 0L
+            return
+        }
         val at = nextAt(p.cardHour, p.cardMinute, System.currentTimeMillis())
+        p.cardNextAt = at
         runCatching {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         }.onFailure { e ->
@@ -93,6 +99,57 @@ object CardWatch {
     fun syncAll(ctx: Context) {
         val accounts = (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
         accounts.forEach { sync(ctx, it) }
+    }
+
+    /**
+     * 补查：进程被杀、闹钟被系统清掉之后，下次有机会时把漏掉的那次补上。
+     * 判断依据是本机记下的「下次该查的时刻」，超过 10 分钟算漏。
+     * 23:00–03:00 不查，只把闹钟重排一次。
+     */
+    /** 该不该补查：开着、排过、过了预定时刻 10 分钟以上，且不在禁查时段 */
+    fun shouldCatchUp(enabled: Boolean, next: Long, now: Long, hour: Int): Boolean {
+        if (!enabled || next <= 0L) return false
+        if (hour >= QUIET_FROM || hour < QUIET_TO) return false
+        return now > next + 10 * 60_000L
+    }
+
+    fun catchUp(ctx: Context) {
+        val accounts = (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
+        val nowZ = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault())
+        accounts.forEach { acc ->
+            val p = Prefs(ctx, acc)
+            if (!p.cardAutoOn) return@forEach
+            val now = System.currentTimeMillis()
+            if (shouldCatchUp(p.cardAutoOn, p.cardNextAt, now, nowZ.hour)) {
+                runCatching { check(ctx, acc) }.onFailure { Diag.record("CardWatch.catchUp", it) }
+            }
+            sync(ctx, acc)
+        }
+    }
+
+    /**
+     * 看门狗：每 6 小时醒一次，把各账号的定时查询重新排上。
+     * 华为/Honor 一类系统清后台、清闹钟之后，靠这条把查询接回来。
+     */
+    fun ensureWatchdog(ctx: Context) {
+        val p = Prefs(ctx)
+        val now = System.currentTimeMillis()
+        if (now - p.watchArmedAt in 0 until 5L * 3600_000L) return
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = PendingIntent.getBroadcast(
+            ctx,
+            REQ_WATCH,
+            Intent(ctx, CardWatchReceiver::class.java).setAction(ACTION_WATCH),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        runCatching {
+            am.setInexactRepeating(
+                AlarmManager.RTC_WAKEUP,
+                now + 6L * 3600_000L,
+                6L * 3600_000L,
+                pi,
+            )
+        }.onSuccess { p.watchArmedAt = now }.onFailure { Diag.record("CardWatch.watchdog", it) }
     }
 
     private fun pending(ctx: Context, account: String): PendingIntent = PendingIntent.getBroadcast(
@@ -183,6 +240,21 @@ object CardWatch {
 /** 定时查询的落点：查完把下一次排上，账号随 Intent 带过来 */
 class CardWatchReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // 看门狗：只负责把各账号的定时查询重新排上，并补上漏掉的那次
+        if (intent.action == CardWatch.ACTION_WATCH) {
+            val pending = goAsync()
+            Thread {
+                try {
+                    CardWatch.catchUp(context)
+                } catch (e: Exception) {
+                    Diag.record("CardWatch.watchdog", e)
+                } finally {
+                    CardWatch.ensureWatchdog(context)
+                    pending.finish()
+                }
+            }.start()
+            return
+        }
         val account = intent.getStringExtra(CardWatch.EXTRA_ACCOUNT).orEmpty()
         if (account.isBlank()) return
         val pending = goAsync()
