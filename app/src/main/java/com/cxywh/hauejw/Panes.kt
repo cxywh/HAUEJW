@@ -238,7 +238,7 @@ internal fun ToolsPane(
         GroupLabel("生活")
         ToolGrid(
             listOf(
-                Tool("校园卡余额", "电费、水费，登录后自动查", onClick = onFee),
+                Tool("电费查询", "宿舍剩余电量，可定时查询与预警", onClick = onFee),
             )
         )
 
@@ -1026,7 +1026,7 @@ private fun plain(v: Double): String =
     else String.format(Locale.US, "%.2f", v)
 
 /**
- * 校园卡余额（电费）。
+ * 电费查询（宿舍剩余电量）。
  *
  * 登录态由 WebView 拿（CardLoginActivity），房间选定后记在本机。
  * 打开面板只显示上一次的结果，不主动联网；要新的就点「立即查询」。
@@ -1062,7 +1062,8 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
     }
 
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        if (r.resultCode == Activity.RESULT_OK) auth = CardFee.auth ?: CardFee.load(ctx, sno)
+        // 只认本学号的凭据：本机可能还存着别的学号的 token
+        if (r.resultCode == Activity.RESULT_OK) auth = CardFee.load(ctx, sno)
     }
     val askPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permitted = granted && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
@@ -1093,10 +1094,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
             }
         }
         r.onSuccess { (cur, list) ->
-            if (cur.token != a.token) {
-                CardFee.auth = cur
-                if (sno.isNotBlank()) CardFee.save(ctx, sno, cur)
-            }
+            if (cur.token != a.token && sno.isNotBlank()) CardFee.save(ctx, sno, cur)
             val hit = list.firstOrNull { it.name.contains("电") } ?: list.firstOrNull()
             itemId = hit?.id.orEmpty()
             if (hit != null) prefs.cardItemId = hit.id   // 定时查询要用
@@ -1159,12 +1157,17 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         kotlinx.coroutines.delay(500)
         prefs.cardHour = hour
         prefs.cardMinute = minute
-        if (autoOn) CardWatch.schedule(ctx, prefs)
+        CardWatch.sync(ctx, sno)
     }
 
     PaneShell(onClose) {
-        PaneTitle("校园卡余额", onClose)
+        PaneTitle("电费查询", onClose)
         Text("数据来自学校校园卡平台，只查询，不在这里缴费。", fontSize = 11.5.sp, color = C.dim)
+        if (sno.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            // 本机可能存了多个学号，标明这份数据属于谁
+            Text("学号 " + sno, fontSize = 11.sp, color = C.dim)
+        }
         Spacer(Modifier.height(12.dp))
 
         if (auth == null) {
@@ -1278,7 +1281,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 onCheckedChange = { on ->
                     autoOn = on
                     prefs.cardAutoOn = on
-                    CardWatch.schedule(ctx, prefs)
+                    CardWatch.sync(ctx, sno)
                     if (on && !permitted) askPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
                 },
             )

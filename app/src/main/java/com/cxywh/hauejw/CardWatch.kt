@@ -20,16 +20,21 @@ import java.time.ZonedDateTime
  * 每天在用户设定的时刻查一次，结果写本机缓存；低于预警值发一条通知；
  * 查询失败（凭据过期、网络不通）也发一条，免得用户以为还查着。
  *
+ * 一切按账号分开：每个学号各排自己的闹钟、各写自己的缓存、各发自己的通知，
+ * 本机存了多个学号时互不影响。
+ *
  * 学校系统 23:00–03:00 不开放查询，落在这段的时刻顺延到 03:05。
  */
 object CardWatch {
 
-    const val REQ = 7301
+    /** 请求码区间与提醒（71xx）、心跳（72xx）分开 */
+    private const val REQ_BASE = 0x73010000.toInt()
+    private const val NOTE_BASE = 0x73020000.toInt()
     private const val CH_ID = "card_warn"
-    private const val NOTE_ID = 7301
     private const val QUIET_FROM = 23
     private const val QUIET_TO = 3
     private const val SEP = "|"
+    const val EXTRA_ACCOUNT = "account"
 
     /** 一次查询的结果缓存 */
     data class Cache(val label: String, val value: Double, val unit: String, val at: Long)
@@ -44,6 +49,11 @@ object CardWatch {
         val at = p[3].toLongOrNull() ?: return null
         return Cache(p[0], v, p[2], at)
     }
+
+    /** 每个账号一个请求码，排别人的闹钟不会顶掉这个 */
+    fun reqOf(account: String): Int = REQ_BASE or (account.hashCode() and 0xFFFF)
+
+    private fun noteIdOf(account: String): Int = NOTE_BASE or (account.hashCode() and 0xFF)
 
     /** 落在不可查询时段就顺延到当天/次日的 03:05 */
     fun shiftOutOfQuiet(at: ZonedDateTime): ZonedDateTime = when {
@@ -62,12 +72,15 @@ object CardWatch {
         return at.toInstant().toEpochMilli()
     }
 
-    fun schedule(ctx: Context, prefs: Prefs) {
+    /** 按这个账号自己的设置排期；关掉了就取消它的闹钟 */
+    fun sync(ctx: Context, account: String) {
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val pi = pending(ctx)
+        val pi = pending(ctx, account)
         am.cancel(pi)
-        if (!prefs.cardAutoOn) return
-        val at = nextAt(prefs.cardHour, prefs.cardMinute, System.currentTimeMillis())
+        if (account.isBlank()) return
+        val p = Prefs(ctx, account)
+        if (!p.cardAutoOn) return
+        val at = nextAt(p.cardHour, p.cardMinute, System.currentTimeMillis())
         runCatching {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         }.onFailure { e ->
@@ -76,49 +89,56 @@ object CardWatch {
         }
     }
 
-    private fun pending(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+    /** 本机存过的账号各按自己的设置重排一次（开机、改系统时间后用） */
+    fun syncAll(ctx: Context) {
+        val accounts = (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
+        accounts.forEach { sync(ctx, it) }
+    }
+
+    private fun pending(ctx: Context, account: String): PendingIntent = PendingIntent.getBroadcast(
         ctx,
-        REQ,
-        Intent(ctx, CardWatchReceiver::class.java),
+        reqOf(account),
+        Intent(ctx, CardWatchReceiver::class.java).putExtra(EXTRA_ACCOUNT, account),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
     /** 查一次并落缓存；失败与低余额各发一条通知 */
-    fun check(ctx: Context, prefs: Prefs) {
-        val sno = prefs.username
-        val room = prefs.cardRoom
-        val item = prefs.cardItemId
-        if (sno.isBlank() || room.isBlank() || item.isBlank()) return
+    fun check(ctx: Context, account: String) {
+        if (account.isBlank()) return
+        val p = Prefs(ctx, account)
+        val room = p.cardRoom
+        val item = p.cardItemId
+        if (room.isBlank() || item.isBlank()) return
         val picked = CardFee.roomOf(room)
         runCatching {
-            var auth = CardFee.load(ctx, sno) ?: throw CardFee.NeedLogin()
+            var auth = CardFee.load(ctx, account) ?: throw CardFee.NeedLogin()
             if (!auth.alive()) auth = CardFee.refresh(auth) ?: throw CardFee.NeedLogin()
             CardFee.meters(ctx, auth.token, item, picked, picked.size)
         }.onSuccess { a ->
-            prefs.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
-            if (prefs.cardWarnOn && a.value <= prefs.cardWarn) {
+            p.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
+            if (p.cardWarnOn && a.value <= p.cardWarn) {
                 val now = System.currentTimeMillis()
-                if (now - prefs.cardLastNotify > 20L * 3600_000L) {
-                    val where = prefs.cardRoomName.ifBlank { "宿舍电费" }
+                if (now - p.cardLastNotify > 20L * 3600_000L) {
+                    val where = p.cardRoomName.ifBlank { "宿舍电费" }
                     notify(
-                        ctx,
+                        ctx, account,
                         "电费余额低",
                         where + " 剩余 " + fmt(a.value) + a.unit + "，已低于预警 " +
-                            fmt(prefs.cardWarn) + a.unit,
+                            fmt(p.cardWarn) + a.unit,
                     )
-                    prefs.cardLastNotify = now
+                    p.cardLastNotify = now
                 }
             }
         }.onFailure { e ->
             val now = System.currentTimeMillis()
-            if (now - prefs.cardLastNotify > 12L * 3600_000L) {
+            if (now - p.cardLastNotify > 12L * 3600_000L) {
                 notify(
-                    ctx,
+                    ctx, account,
                     "电费查询失败",
-                    if (e is CardFee.NeedLogin) "校园卡登录已过期，去「校园卡余额」重新登录一次。"
+                    if (e is CardFee.NeedLogin) "登录已过期，去「电费查询」重新登录一次。"
                     else "查询出错：" + (e.message ?: e.javaClass.simpleName),
                 )
-                prefs.cardLastNotify = now
+                p.cardLastNotify = now
             }
         }
     }
@@ -138,7 +158,7 @@ object CardWatch {
         )
     }
 
-    private fun notify(ctx: Context, title: String, text: String) {
+    private fun notify(ctx: Context, account: String, title: String, text: String) {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
         ensureChannel(ctx)
         val tap = PendingIntent.getActivity(
@@ -151,26 +171,28 @@ object CardWatch {
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle(title)
             .setContentText(text)
+            .setSubText(account)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(tap)
             .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(NOTE_ID, n) }
+        runCatching { NotificationManagerCompat.from(ctx).notify(noteIdOf(account), n) }
     }
 }
 
-/** 定时查询的落点：查完把下一次排上 */
+/** 定时查询的落点：查完把下一次排上，账号随 Intent 带过来 */
 class CardWatchReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val account = intent.getStringExtra(CardWatch.EXTRA_ACCOUNT).orEmpty()
+        if (account.isBlank()) return
         val pending = goAsync()
         Thread {
-            val prefs = Prefs(context)
             try {
-                CardWatch.check(context, prefs)
+                CardWatch.check(context, account)
             } catch (e: Exception) {
                 Diag.record("CardWatch.check", e)
             } finally {
-                CardWatch.schedule(context, prefs)
+                CardWatch.sync(context, account)
                 pending.finish()
             }
         }.start()

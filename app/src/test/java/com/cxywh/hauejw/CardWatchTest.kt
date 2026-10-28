@@ -107,4 +107,20 @@ class CardWatchTest {
     fun wipeCard_空账号不动任何键() {
         assertEquals(emptyList<String>(), cardKeysToWipe(listOf("card_room@A"), ""))
     }
+
+    @Test
+    fun reqOf_每个学号各自一个请求码() {
+        val a = CardWatch.reqOf("202300000001")
+        val b = CardWatch.reqOf("202300000002")
+        assertEquals(a, CardWatch.reqOf("202300000001"))
+        assertTrue("两个学号撞了请求码", a != b)
+        assertTrue("请求码不应与提醒的 71xx 重叠", a > 0x73000000)
+    }
+
+    @Test
+    fun 两个学号的电费数据互不相干() {
+        assertTrue(scopedKey("card_cache", "202300000001") != scopedKey("card_cache", "202300000002"))
+        assertTrue(scopedKey("card_room", "202300000001") != scopedKey("card_room", "202300000002"))
+        assertEquals("card_room@202300000001", scopedKey("card_room", "202300000001"))
+    }
 }

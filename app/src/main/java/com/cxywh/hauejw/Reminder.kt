@@ -360,7 +360,7 @@ class BootReceiver : BroadcastReceiver() {
             -> {
                 val p = Prefs(context)
                 Reminder.rearmFromPlan(context, p)
-                CardWatch.schedule(context, p)
+                CardWatch.syncAll(context)
                 // 闹钟被系统清空后小组件也停在旧内容上，一并刷新
                 HaueWidget.refresh(context)
             }

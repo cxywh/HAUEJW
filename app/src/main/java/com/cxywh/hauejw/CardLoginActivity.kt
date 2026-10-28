@@ -334,7 +334,6 @@ class CardLoginActivity : Activity() {
 
     private fun finishWith(auth: CardFee.Auth) {
         if (done && isFinishing) return
-        CardFee.auth = auth
         if (sno.isNotBlank()) CardFee.save(this, sno, auth)
         diag("token captured len=" + auth.token.length + " refresh=" + auth.refresh.length)
         setResult(RESULT_OK, Intent().putExtra(EXTRA_SNO, sno))

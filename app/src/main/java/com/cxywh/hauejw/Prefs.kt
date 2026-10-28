@@ -5,15 +5,22 @@ import org.json.JSONObject
 import java.time.LocalDate
 
 /** 本地存储：只存学号 + 课表缓存 + 导入的课表 + 本地修改 + 界面偏好；密码绝不落盘 */
-class Prefs(context: Context) {
+/**
+ * @param fixedAccount 指定账号时键名按它拼；不传就跟着当前登录账号走。
+ * 定时查询要在后台读写「不是当前账号」的数据，所以需要这个入口。
+ */
+class Prefs(context: Context, private val fixedAccount: String? = null) {
 
     private val sp = context.getSharedPreferences("hauejw", Context.MODE_PRIVATE)
 
     /** 当前账号；没登录时用占位符，避免键名互相覆盖 */
-    private fun acc() = username.ifBlank { "_default" }
+    private fun acc() = account().ifBlank { "_default" }
 
     /** 账号私有数据的键名（课表缓存 / 保存时间 / 来源 / 本地修改），不同账号互不干扰 */
-    private fun key(base: String) = scopedKey(base, username)
+    private fun key(base: String) = scopedKey(base, fixedAccount ?: username)
+
+    /** 这套数据实际属于哪个账号 */
+    fun account(): String = fixedAccount ?: username
 
     var username: String
         get() = sp.getString("username", "") ?: ""

@@ -54,7 +54,6 @@ object CardFee {
     class NeedLogin(message: String = "登录已过期，请重新登录校园卡") : IOException(message)
 
     /** 内存里的登录态：token 不写日志、不进 Intent；落盘那份经 SecretStore 加密 */
-    @Volatile var auth: Auth? = null
 
     // ───────────────────────── 纯解析 ─────────────────────────
 
@@ -351,7 +350,6 @@ object CardFee {
 
     fun clear(ctx: Context, sno: String) {
         SecretStore.save(ctx, "card@$sno", "")
-        auth = null
     }
 
     /**
@@ -363,7 +361,6 @@ object CardFee {
         SecretStore.forget(ctx, "card@$sno")
         val p = Prefs(ctx)
         p.wipeCard(sno)
-        CardWatch.schedule(ctx, p)
-        auth = null
+        CardWatch.sync(ctx, sno)
     }
 }
