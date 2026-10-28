@@ -19,6 +19,16 @@ class Prefs(context: Context) {
         get() = sp.getString("username", "") ?: ""
         set(v) = sp.edit().putString("username", v).apply()
 
+    /** 电费房间：提交用的键值对，形如 xiaoqu_id=1&loudong_id=505&louceng_id=601&room_id=15160 */
+    var cardRoom: String
+        get() = sp.getString(key("card_room"), "") ?: ""
+        set(v) = sp.edit().putString(key("card_room"), v).apply()
+
+    /** 电费房间的可读名字，形如 某校区某号楼 A区1层 101 */
+    var cardRoomName: String
+        get() = sp.getString(key("card_room_name"), "") ?: ""
+        set(v) = sp.edit().putString(key("card_room_name"), v).apply()
+
     var rememberUsername: Boolean
         get() = sp.getBoolean("rememberUsername", true)
         set(v) = sp.edit().putBoolean("rememberUsername", v).apply()

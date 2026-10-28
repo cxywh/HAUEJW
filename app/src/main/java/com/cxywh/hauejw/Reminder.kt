@@ -129,7 +129,8 @@ object Reminder {
         from: LocalDateTime = LocalDateTime.now(),
     ): List<RemindItem> {
         val out = mutableListOf<RemindItem>()
-        val today = LocalDate.now()
+        // 窗口从 from 当天起算：from 默认是「现在」，测试里注入固定时刻时结果才是确定的
+        val today = from.toLocalDate()
         for (i in 0 until WINDOW_DAYS) {
             val date = today.plusDays(i.toLong())
             val week = WeekUtils.weekOf(tt.term, date) ?: continue

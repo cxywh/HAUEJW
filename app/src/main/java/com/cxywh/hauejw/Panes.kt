@@ -4,6 +4,7 @@ package com.cxywh.hauejw
 // 从 MainActivity 拆出来：主文件只留 Activity、Root 与课表主体，这里放侧栏各面板。
 // 这些组件用到的私有辅助已在各自文件内放开为 internal。
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -59,6 +60,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.Locale
 
 @Composable
 internal fun PaneShell(onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
@@ -214,6 +216,7 @@ internal fun ToolsPane(
     onAccounts: () -> Unit,
     onWidget: () -> Unit,
     onEcho: () -> Unit,
+    onFee: () -> Unit,
     onLoginAgain: () -> Unit, onLogout: () -> Unit, onClose: () -> Unit,
 ) {
     PaneShell(onClose) {
@@ -227,6 +230,13 @@ internal fun ToolsPane(
                 Tool("周次总览", "整学期每周怎么排", onClick = onWeeks),
                 Tool("本地修改", "改课名、去掉某次课", onClick = onChanges),
                 Tool("课前提醒", "提前多久、怎么提醒", onClick = onRemind),
+            )
+        )
+
+        GroupLabel("生活")
+        ToolGrid(
+            listOf(
+                Tool("校园卡余额", "电费、水费，登录后自动查", onClick = onFee),
             )
         )
 
@@ -982,5 +992,272 @@ internal fun AccountPane(
             "不想再记住某个账号：登录页账号行右侧的「×」可以单独忘掉它。",
             fontSize = 11.sp, color = C.dim,
         )
+    }
+}
+
+// ─────────────────────── 校园卡 / 电费 ───────────────────────
+
+/** 金额显示：整数不带小数（50元），有小数保留两位（12.34度） */
+private fun moneyText(a: CardFee.Amount): String {
+    val n = if (a.value == a.value.toLong().toDouble()) {
+        String.format(Locale.US, "%,d", a.value.toLong())
+    } else {
+        String.format(Locale.US, "%.2f", a.value)
+    }
+    return n + a.unit
+}
+
+/** 「xiaoqu_id=1&loudong_id=505&…」形式的房间选择还原成键值对 */
+private fun roomOf(s: String): Map<String, String> =
+    s.split("&").mapNotNull { p ->
+        val i = p.indexOf('=')
+        if (i > 0) p.substring(0, i) to p.substring(i + 1) else null
+    }.toMap()
+
+/**
+ * 校园卡余额（电费）。
+ *
+ * 登录态由 WebView 拿（CardLoginActivity），这里只做三件事：
+ * 取费项编号 → 逐级选宿舍房间 → 查电表读数。
+ * 费项编号不写死：从应用列表里找名字带「电」的那条。
+ * 房间选择记在本机，之后直接查；换房间随时可以重选。
+ */
+@Composable
+internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val sno = prefs.username
+    var auth by remember { mutableStateOf(CardFee.load(ctx, sno)) }
+    var itemId by remember { mutableStateOf("") }
+    var room by remember { mutableStateOf(prefs.cardRoom) }
+    var roomName by remember { mutableStateOf(prefs.cardRoomName) }
+    var amount by remember { mutableStateOf<CardFee.Amount?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var tick by remember { mutableStateOf(0) }
+
+    var pickLevel by remember { mutableStateOf(0) }
+    var pickCodes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pickOpts by remember { mutableStateOf<List<CardFee.Opt>>(emptyList()) }
+    var pickParams by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pickNames by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == Activity.RESULT_OK) auth = CardFee.auth ?: CardFee.load(ctx, sno)
+    }
+
+    fun openLogin() {
+        login.launch(
+            Intent(ctx, CardLoginActivity::class.java).putExtra(CardLoginActivity.EXTRA_SNO, sno)
+        )
+    }
+
+    fun forget() {
+        CardFee.clear(ctx, sno)
+        auth = null
+        amount = null
+        note = null
+    }
+
+    // 费项编号
+    LaunchedEffect(auth?.token) {
+        val a = auth ?: return@LaunchedEffect
+        busy = true
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                var cur = a
+                if (!cur.alive()) cur = CardFee.refresh(cur) ?: throw CardFee.NeedLogin()
+                cur to CardFee.fetchItems(ctx, cur.token)
+            }
+        }
+        busy = false
+        r.onSuccess { (cur, list) ->
+            if (cur.token != a.token) {
+                CardFee.auth = cur
+                if (sno.isNotBlank()) CardFee.save(ctx, sno, cur)
+            }
+            val hit = list.firstOrNull { it.name.contains("电") } ?: list.firstOrNull()
+            itemId = hit?.id.orEmpty()
+            if (hit == null) note = "这个账号下没有可查的费项。"
+        }.onFailure { e ->
+            if (e is CardFee.NeedLogin) {
+                auth = null
+                if (sno.isNotBlank()) CardFee.clear(ctx, sno)
+                note = "登录已过期，请重新登录。"
+            } else {
+                note = "查询失败：" + (e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    // 选房间：每级拉一次选项
+    LaunchedEffect(auth?.token, itemId, room, pickLevel, pickParams) {
+        val a = auth ?: return@LaunchedEffect
+        if (itemId.isBlank() || room.isNotBlank()) return@LaunchedEffect
+        busy = true
+        val r = withContext(Dispatchers.IO) {
+            runCatching { CardFee.step(ctx, a.token, itemId, pickParams, pickLevel) }
+        }
+        busy = false
+        r.onSuccess { st ->
+            if (st.codes.isNotEmpty()) pickCodes = st.codes
+            pickOpts = st.opts
+            if (st.opts.isEmpty()) note = "这一级没有可选房间。"
+        }.onFailure { e -> note = "取房间列表失败：" + (e.message ?: "") }
+    }
+
+    // 有房间就查读数
+    LaunchedEffect(auth?.token, itemId, room, tick) {
+        val a = auth ?: return@LaunchedEffect
+        if (itemId.isBlank() || room.isBlank()) return@LaunchedEffect
+        busy = true
+        note = null
+        val r = withContext(Dispatchers.IO) {
+            runCatching { CardFee.meters(ctx, a.token, itemId, roomOf(room), 4) }
+        }
+        busy = false
+        r.onSuccess { amount = it }.onFailure { e ->
+            amount = null
+            if (e is CardFee.NeedLogin) {
+                auth = null
+                if (sno.isNotBlank()) CardFee.clear(ctx, sno)
+                note = "登录已过期，请重新登录。"
+            } else {
+                note = e.message ?: "查询失败"
+            }
+        }
+    }
+
+    PaneShell(onClose) {
+        PaneTitle("校园卡余额", onClose)
+        Text("数据来自学校校园卡平台，只查询，不在这里缴费。", fontSize = 11.5.sp, color = C.dim)
+        Spacer(Modifier.height(12.dp))
+
+        if (auth == null) {
+            Text(
+                "需要先登录一次校园卡。登录页是学校自己的页面，验证码和密码都在那里输入，" +
+                    "本应用只保存登录凭据用来查询，不保存密码。",
+                fontSize = 12.sp, color = C.fgSub,
+            )
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = { openLogin() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = C.accent),
+                ) { Text("登录校园卡") }
+            }
+            return@PaneShell
+        }
+
+        if (room.isBlank()) {
+            // 逐级选房间
+            Text(
+                pickNames.joinToString(" ").ifBlank { "依次选择校区、楼栋、楼层、房间" },
+                fontSize = 12.sp, color = if (pickNames.isEmpty()) C.dim else C.fgSub,
+            )
+            Spacer(Modifier.height(10.dp))
+            if (busy) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = C.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Text("正在读取", fontSize = 12.5.sp, color = C.dim)
+                }
+            } else {
+                pickOpts.forEach { o ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            val code = pickCodes.getOrNull(pickLevel) ?: return@clickable
+                            val next = pickParams + (code to o.value)
+                            val names = pickNames + o.name
+                            if (pickLevel + 1 < pickCodes.size) {
+                                pickParams = next
+                                pickNames = names
+                                pickLevel += 1
+                            } else {
+                                val encoded = next.entries.joinToString("&") { it.key + "=" + it.value }
+                                prefs.cardRoom = encoded
+                                prefs.cardRoomName = names.drop(1).joinToString(" ")
+                                room = encoded
+                                roomName = prefs.cardRoomName
+                                pickParams = emptyMap()
+                                pickNames = emptyList()
+                                pickLevel = 0
+                            }
+                        }.padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(o.name, fontSize = 13.5.sp, color = C.fg, modifier = Modifier.weight(1f))
+                        Text("›", fontSize = 16.sp, color = C.dim)
+                    }
+                    Box(Modifier.fillMaxWidth().height(0.5.dp).background(C.line))
+                }
+            }
+            note?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, fontSize = 12.sp, color = C.danger)
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { openLogin() }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
+                    Text("重新登录")
+                }
+                TextButton(onClick = { forget() }, colors = ButtonDefaults.textButtonColors(contentColor = C.dim)) {
+                    Text("忘记登录")
+                }
+            }
+            return@PaneShell
+        }
+
+        // 余额
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(amount?.label ?: "电费", fontSize = 13.5.sp, color = C.fg, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(2.dp))
+                Text(roomName, fontSize = 11.sp, color = C.dim)
+            }
+            amount?.let {
+                Text(moneyText(it), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(0.5.dp).background(C.line))
+
+        if (busy) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = C.accent)
+                Spacer(Modifier.width(10.dp))
+                Text("正在查询", fontSize = 12.5.sp, color = C.dim)
+            }
+        }
+        note?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, fontSize = 12.sp, color = C.danger)
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { tick++ }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
+                Text("刷新")
+            }
+            TextButton(
+                onClick = {
+                    prefs.cardRoom = ""
+                    prefs.cardRoomName = ""
+                    room = ""
+                    roomName = ""
+                    amount = null
+                    note = null
+                    pickLevel = 0
+                    pickParams = emptyMap()
+                    pickNames = emptyList()
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = C.accent),
+            ) { Text("换房间") }
+            TextButton(onClick = { openLogin() }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
+                Text("重新登录")
+            }
+            TextButton(onClick = { forget() }, colors = ButtonDefaults.textButtonColors(contentColor = C.dim)) {
+                Text("忘记登录")
+            }
+        }
     }
 }

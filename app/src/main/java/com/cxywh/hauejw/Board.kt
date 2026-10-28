@@ -509,6 +509,7 @@ internal sealed interface Pane {
     data object Echo : Pane
     data object EchoEditor : Pane
     data object Widget : Pane
+    data object Fee : Pane
     data class Detail(val course: Course) : Pane
     data class EditMenu(val course: Course) : Pane
     data class Rename(val course: Course) : Pane
@@ -826,6 +827,7 @@ internal fun BoardScreen(
                 onRemind = { pane = Pane.Remind },
                 onWidget = { pane = Pane.Widget },
                 onEcho = { pane = Pane.Echo },
+                onFee = { pane = Pane.Fee },
                 onAccounts = { pane = Pane.Accounts },
                 onLoginAgain = { pane = null; onLoginAgain() },
                 onLogout = { pane = null; onLogout() },
@@ -874,6 +876,7 @@ internal fun BoardScreen(
                 onEdit = { pane = Pane.EchoEditor },
             ) { pane = null; HaueWidget.refresh(ctx) }
             is Pane.EchoEditor -> EchoEditorPane { pane = null; HaueWidget.refresh(ctx) }
+            is Pane.Fee -> FeePane(prefs) { pane = null }
             is Pane.Accounts -> AccountPane(
                 prefs = prefs,
                 current = tt.student.id.ifBlank { prefs.username },

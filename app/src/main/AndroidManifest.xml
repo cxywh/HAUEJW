@@ -23,6 +23,13 @@
         android:theme="@style/Theme.HAUEJW">
 
         <activity
+            android:name=".CardLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:label="登录校园卡"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
