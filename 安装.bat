@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 title 安装教务助手到手机
 cd /d "%~dp0"
@@ -8,7 +8,11 @@ set "APK="
 for /f "delims=" %%f in ('dir /b /o-d "dist\*.apk" 2^>nul') do if not defined APK set "APK=dist\%%f"
 
 set ADB=adb
-where adb >nul 2>&1 || set ADB=D:\platformtools\adb.exe
+where adb >nul 2>&1 || (
+  echo 没找到 adb。请把 Android SDK 的 platform-tools 目录加入 PATH 后重来。
+  pause
+  exit /b 1
+)
 
 echo ================================================
 echo  安装「教务助手」到已连接的手机

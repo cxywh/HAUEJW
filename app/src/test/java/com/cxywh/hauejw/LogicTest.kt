@@ -205,9 +205,9 @@ class LogicTest {
         assertEquals(5, c.startSlot)                 // 14:00 → 第 5 节
         assertEquals(8, c.endSlot)                   // 17:30 → 第 8 节
         assertEquals(setOf(1, 2), c.weeks)
-        assertEquals("魏老师", c.teacher)
-        assertEquals("南校区", c.campus)
-        assertEquals("9A306-307", c.room)
+        assertEquals("某老师", c.teacher)
+        assertEquals("某校区", c.campus)
+        assertEquals("9A101", c.room)
     }
 
     @Test

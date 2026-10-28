@@ -11,11 +11,24 @@
 
 用法: HAUE_PW='<密码>' python verify_app_requests.py [学号]
 """
-import os, re, sys, json, time, datetime, argparse
+import os, re, sys, json, time, datetime, argparse, base64, secrets
 import http.cookiejar, urllib.request, urllib.parse
 
-sys.path.insert(0, r"D:/work/haue-jwglxt")
-from haue_login import rsa_encrypt_pkcs1v15
+
+def rsa_encrypt_pkcs1v15(text, modulus_b64, exponent_b64):
+    """PKCS#1 v1.5 加密，纯标准库实现（与 App 里 JwApi 的做法一致）。"""
+    n = int.from_bytes(base64.b64decode(modulus_b64), "big")
+    e = int.from_bytes(base64.b64decode(exponent_b64), "big")
+    k = (n.bit_length() + 7) // 8
+    msg = text.encode("utf-8")
+    pad_len = k - len(msg) - 3
+    if pad_len < 8:
+        raise ValueError("明文超出 RSA 块长度")
+    ps = bytes(b for b in secrets.token_bytes(pad_len * 2) if b != 0)[:pad_len]
+    while len(ps) < pad_len:
+        ps += bytes(b for b in secrets.token_bytes(pad_len) if b != 0)[: pad_len - len(ps)]
+    em = b"\x00\x02" + ps + b"\x00" + msg
+    return base64.b64encode(pow(int.from_bytes(em, "big"), e, n).to_bytes(k, "big")).decode()
 
 HOST = "124.system.haue.edu.cn"
 BASE = "http://" + HOST
