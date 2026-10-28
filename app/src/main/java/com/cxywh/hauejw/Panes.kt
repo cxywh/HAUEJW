@@ -60,6 +60,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
+import androidx.compose.ui.text.TextStyle
+import android.content.Context
 import java.util.Locale
 
 @Composable
@@ -978,9 +980,16 @@ internal fun AccountPane(
         } else {
             saved.forEach { id ->
                 val isCur = id == cur
+                // 校园卡凭据与账号是同一学号，这里只作标注，不参与切换
+                val card = CardFee.bound(ctx, id)
                 RowItem(
                     if (isCur) "$id（当前）" else id,
-                    if (isCur) null else "点一下切换到该账号",
+                    when {
+                        isCur && card -> "已绑定校园卡"
+                        isCur -> null
+                        card -> "已绑定校园卡 · 点一下切换"
+                        else -> "点一下切换到该账号"
+                    },
                     onClick = { if (!isCur) onSwitch(id) },
                 )
             }
@@ -1007,30 +1016,31 @@ private fun moneyText(a: CardFee.Amount): String {
     return n + a.unit
 }
 
-/** 「xiaoqu_id=1&loudong_id=505&…」形式的房间选择还原成键值对 */
-private fun roomOf(s: String): Map<String, String> =
-    s.split("&").mapNotNull { p ->
-        val i = p.indexOf('=')
-        if (i > 0) p.substring(0, i) to p.substring(i + 1) else null
-    }.toMap()
+private fun two(n: Int) = n.toString().padStart(2, '0')
+
+private fun clockOf(at: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(at))
+
+private fun plain(v: Double): String =
+    if (v == v.toLong().toDouble()) v.toLong().toString()
+    else String.format(Locale.US, "%.2f", v)
 
 /**
  * 校园卡余额（电费）。
  *
- * 登录态由 WebView 拿（CardLoginActivity），这里只做三件事：
- * 取费项编号 → 逐级选宿舍房间 → 查电表读数。
- * 费项编号不写死：从应用列表里找名字带「电」的那条。
- * 房间选择记在本机，之后直接查；换房间随时可以重选。
+ * 登录态由 WebView 拿（CardLoginActivity），房间选定后记在本机。
+ * 打开面板只显示上一次的结果，不主动联网；要新的就点「立即查询」。
+ * 定时查询与余额预警在下面的设置里开，由 CardWatch 每天跑一次。
  */
 @Composable
 internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val sno = prefs.username
     var auth by remember { mutableStateOf(CardFee.load(ctx, sno)) }
-    var itemId by remember { mutableStateOf("") }
+    var itemId by remember { mutableStateOf(prefs.cardItemId) }
     var room by remember { mutableStateOf(prefs.cardRoom) }
     var roomName by remember { mutableStateOf(prefs.cardRoomName) }
-    var amount by remember { mutableStateOf<CardFee.Amount?>(null) }
+    var cache by remember { mutableStateOf(CardWatch.decode(prefs.cardCache)) }
     var note by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var tick by remember { mutableStateOf(0) }
@@ -1041,8 +1051,22 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
     var pickParams by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var pickNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
+    var autoOn by remember { mutableStateOf(prefs.cardAutoOn) }
+    var hour by remember { mutableStateOf(prefs.cardHour) }
+    var minute by remember { mutableStateOf(prefs.cardMinute) }
+    var warnOn by remember { mutableStateOf(prefs.cardWarnOn) }
+    var warnText by remember { mutableStateOf(plain(prefs.cardWarn)) }
+
+    var permitted by remember {
+        mutableStateOf(NotificationManagerCompat.from(ctx).areNotificationsEnabled())
+    }
+
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == Activity.RESULT_OK) auth = CardFee.auth ?: CardFee.load(ctx, sno)
+    }
+    val askPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permitted = granted && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        note = if (permitted) "通知权限已开启。" else "系统没给通知权限，预警发不出来。"
     }
 
     fun openLogin() {
@@ -1051,17 +1075,16 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         )
     }
 
-    fun forget() {
-        CardFee.clear(ctx, sno)
-        auth = null
-        amount = null
-        note = null
+    fun saveWarn() {
+        val v = warnText.trim().toDoubleOrNull() ?: return
+        prefs.cardWarn = v
+        warnText = plain(prefs.cardWarn)
     }
 
-    // 费项编号
+    // 费项编号：本机没有才去问一次
     LaunchedEffect(auth?.token) {
         val a = auth ?: return@LaunchedEffect
-        busy = true
+        if (itemId.isNotBlank()) return@LaunchedEffect
         val r = withContext(Dispatchers.IO) {
             runCatching {
                 var cur = a
@@ -1069,7 +1092,6 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 cur to CardFee.fetchItems(ctx, cur.token)
             }
         }
-        busy = false
         r.onSuccess { (cur, list) ->
             if (cur.token != a.token) {
                 CardFee.auth = cur
@@ -1077,6 +1099,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
             }
             val hit = list.firstOrNull { it.name.contains("电") } ?: list.firstOrNull()
             itemId = hit?.id.orEmpty()
+            if (hit != null) prefs.cardItemId = hit.id   // 定时查询要用
             if (hit == null) note = "这个账号下没有可查的费项。"
         }.onFailure { e ->
             if (e is CardFee.NeedLogin) {
@@ -1105,18 +1128,22 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         }.onFailure { e -> note = "取房间列表失败：" + (e.message ?: "") }
     }
 
-    // 有房间就查读数
-    LaunchedEffect(auth?.token, itemId, room, tick) {
+    // 只有点了「立即查询」或刚选完房间才联网
+    LaunchedEffect(tick) {
+        if (tick == 0) return@LaunchedEffect
         val a = auth ?: return@LaunchedEffect
         if (itemId.isBlank() || room.isBlank()) return@LaunchedEffect
         busy = true
         note = null
+        val picked = CardFee.roomOf(room)
         val r = withContext(Dispatchers.IO) {
-            runCatching { CardFee.meters(ctx, a.token, itemId, roomOf(room), 4) }
+            runCatching { CardFee.meters(ctx, a.token, itemId, picked, picked.size) }
         }
         busy = false
-        r.onSuccess { amount = it }.onFailure { e ->
-            amount = null
+        r.onSuccess { a2 ->
+            prefs.cardCache = CardWatch.encode(a2.label, a2.value, a2.unit, System.currentTimeMillis())
+            cache = CardWatch.decode(prefs.cardCache)
+        }.onFailure { e ->
             if (e is CardFee.NeedLogin) {
                 auth = null
                 if (sno.isNotBlank()) CardFee.clear(ctx, sno)
@@ -1125,6 +1152,14 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 note = e.message ?: "查询失败"
             }
         }
+    }
+
+    // 拨轮拖动时每帧都在变，停下来再落盘和重排
+    LaunchedEffect(hour, minute, autoOn) {
+        kotlinx.coroutines.delay(500)
+        prefs.cardHour = hour
+        prefs.cardMinute = minute
+        if (autoOn) CardWatch.schedule(ctx, prefs)
     }
 
     PaneShell(onClose) {
@@ -1149,7 +1184,6 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         }
 
         if (room.isBlank()) {
-            // 逐级选房间
             Text(
                 pickNames.joinToString(" ").ifBlank { "依次选择校区、楼栋、楼层、房间" },
                 fontSize = 12.sp, color = if (pickNames.isEmpty()) C.dim else C.fgSub,
@@ -1181,6 +1215,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                                 pickParams = emptyMap()
                                 pickNames = emptyList()
                                 pickLevel = 0
+                                tick++          // 选完就查一次
                             }
                         }.padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1200,25 +1235,119 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 TextButton(onClick = { openLogin() }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
                     Text("重新登录")
                 }
-                TextButton(onClick = { forget() }, colors = ButtonDefaults.textButtonColors(contentColor = C.dim)) {
-                    Text("忘记登录")
-                }
+                TextButton(
+                    onClick = {
+                        CardFee.wipe(ctx, sno)
+                        auth = null
+                        cache = null
+                        room = ""
+                        roomName = ""
+                        autoOn = false
+                        warnOn = false
+                        note = "已清除本机保存的校园卡状态。"
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = C.dim),
+                ) { Text("忘记登录") }
             }
             return@PaneShell
         }
 
-        // 余额
+        // 最近一次结果
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(amount?.label ?: "电费", fontSize = 13.5.sp, color = C.fg, fontWeight = FontWeight.Medium)
+                Text(cache?.label ?: "电费", fontSize = 13.5.sp, color = C.fg, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(2.dp))
-                Text(roomName, fontSize = 11.sp, color = C.dim)
+                Text(
+                    roomName + (cache?.let { " · " + clockOf(it.at) + " 查过" } ?: " · 还没查过"),
+                    fontSize = 11.sp, color = C.dim,
+                )
             }
-            amount?.let {
-                Text(moneyText(it), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)
+            cache?.let {
+                Text(plain(it.value) + it.unit, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)
             }
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(C.line))
+        Spacer(Modifier.height(12.dp))
+
+        // 定时查询
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("定时查询", fontSize = 13.5.sp, color = C.fg)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = autoOn,
+                onCheckedChange = { on ->
+                    autoOn = on
+                    prefs.cardAutoOn = on
+                    CardWatch.schedule(ctx, prefs)
+                    if (on && !permitted) askPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                },
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Text("每天 ${two(hour)}:${two(minute)} 查一次，结果存本机", fontSize = 11.sp, color = C.dim)
+        Spacer(Modifier.height(8.dp))
+        TimeWheel(
+            hour = hour, minute = minute,
+            onHour = { h -> hour = h },
+            onMinute = { m -> minute = m },
+        )
+        if (autoOn) {
+            val at = CardWatch.nextAt(hour, minute, System.currentTimeMillis())
+            Text("下一次：" + clockOf(at), fontSize = 11.sp, color = C.dim)
+        }
+        Text(
+            "23:00–03:00 学校系统不开放查询，设在这一段的时刻会自动顺延到 03:05。",
+            fontSize = 11.sp, color = C.dim,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        // 余额预警
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("余额预警", fontSize = 13.5.sp, color = C.fg)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = warnOn,
+                onCheckedChange = { on ->
+                    warnOn = on
+                    prefs.cardWarnOn = on
+                    if (on) {
+                        saveWarn()
+                        if (!permitted) askPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("低于", fontSize = 12.5.sp, color = C.fgSub)
+            Spacer(Modifier.width(8.dp))
+            OutlinedTextField(
+                value = warnText,
+                onValueChange = { warnText = it.filter { c -> c.isDigit() || c == '.' }.take(6) },
+                singleLine = true,
+                modifier = Modifier.width(96.dp),
+                colors = appFieldColors(),
+                textStyle = TextStyle(fontSize = 14.sp, color = C.fg),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(cache?.unit ?: "度", fontSize = 12.5.sp, color = C.fgSub)
+            Spacer(Modifier.width(10.dp))
+            Chip("保存", true) { saveWarn(); note = "预警值已保存为 " + warnText }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "每次查到余额都会比对一次；低于这个值时发一条通知（每天最多一条）。",
+            fontSize = 11.sp, color = C.dim,
+        )
+        if (!permitted) {
+            Spacer(Modifier.height(6.dp))
+            Text("系统未给通知权限，预警发不出来。", fontSize = 11.5.sp, color = C.danger)
+            Spacer(Modifier.height(6.dp))
+            TextButton(
+                onClick = { askPerm.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                colors = ButtonDefaults.textButtonColors(contentColor = C.accent),
+            ) { Text("允许通知权限") }
+        }
 
         if (busy) {
             Spacer(Modifier.height(10.dp))
@@ -1236,7 +1365,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { tick++ }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
-                Text("刷新")
+                Text("立即查询")
             }
             TextButton(
                 onClick = {
@@ -1244,7 +1373,6 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                     prefs.cardRoomName = ""
                     room = ""
                     roomName = ""
-                    amount = null
                     note = null
                     pickLevel = 0
                     pickParams = emptyMap()
@@ -1255,9 +1383,19 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
             TextButton(onClick = { openLogin() }, colors = ButtonDefaults.textButtonColors(contentColor = C.accent)) {
                 Text("重新登录")
             }
-            TextButton(onClick = { forget() }, colors = ButtonDefaults.textButtonColors(contentColor = C.dim)) {
-                Text("忘记登录")
-            }
+            TextButton(
+                onClick = {
+                    CardFee.wipe(ctx, sno)
+                    auth = null
+                    cache = null
+                    room = ""
+                    roomName = ""
+                    autoOn = false
+                    warnOn = false
+                    note = "已清除本机保存的校园卡状态。"
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = C.dim),
+            ) { Text("忘记登录") }
         }
     }
 }

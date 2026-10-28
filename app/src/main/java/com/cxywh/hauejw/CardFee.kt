@@ -328,6 +328,17 @@ object CardFee {
     fun save(ctx: Context, sno: String, a: Auth): Boolean =
         SecretStore.save(ctx, "card@$sno", "${q(a.token)}|${q(a.refresh)}|${a.expiresAt}")
 
+    /** 本机是否存有该学号的校园卡查询凭据 */
+    fun bound(ctx: Context, sno: String): Boolean =
+        !SecretStore.load(ctx, "card@$sno").isNullOrBlank()
+
+    /** 「xiaoqu_id=1&loudong_id=505&…」还原成键值对 */
+    fun roomOf(encoded: String): Map<String, String> =
+        encoded.split("&").mapNotNull { p ->
+            val i = p.indexOf('=')
+            if (i > 0) p.substring(0, i) to p.substring(i + 1) else null
+        }.toMap()
+
     fun load(ctx: Context, sno: String): Auth? {
         val raw = SecretStore.load(ctx, "card@$sno") ?: return null
         val p = raw.split("|")
@@ -340,6 +351,19 @@ object CardFee {
 
     fun clear(ctx: Context, sno: String) {
         SecretStore.save(ctx, "card@$sno", "")
+        auth = null
+    }
+
+    /**
+     * 清掉某个学号的校园卡状态：查询凭据、上次读数、房间、费项编号、预警与定时查询设置。
+     * 清完顺手取消定时查询，避免后台每天空转。
+     */
+    fun wipe(ctx: Context, sno: String) {
+        if (sno.isBlank()) return
+        SecretStore.forget(ctx, "card@$sno")
+        val p = Prefs(ctx)
+        p.wipeCard(sno)
+        CardWatch.schedule(ctx, p)
         auth = null
     }
 }

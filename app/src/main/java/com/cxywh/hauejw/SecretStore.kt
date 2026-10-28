@@ -98,7 +98,8 @@ object SecretStore {
         sp(ctx).all.keys
             .filter { it.startsWith("$K_CT@") }
             .map { it.removePrefix("$K_CT@") }
-            .filter { it.isNotBlank() }
+            // 校园卡查询凭据存在同一个库（键 card@学号），它不是账号，不能出现在切换列表里
+            .filter { it.isNotBlank() && !it.contains("@") }
             .distinct()
     } catch (_: Exception) {
         emptyList()

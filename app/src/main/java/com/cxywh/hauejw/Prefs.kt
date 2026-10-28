@@ -19,10 +19,55 @@ class Prefs(context: Context) {
         get() = sp.getString("username", "") ?: ""
         set(v) = sp.edit().putString("username", v).apply()
 
+    /** 清掉某个账号的校园卡本地状态（房间、上次读数、预警、定时查询）；查询凭据由 SecretStore 单独清 */
+    fun wipeCard(account: String = username) {
+        if (account.isBlank()) return
+        val e = sp.edit()
+        cardKeysToWipe(sp.all.keys, account).forEach { e.remove(it) }
+        e.apply()
+    }
+
     /** 电费房间：提交用的键值对，形如 xiaoqu_id=1&loudong_id=505&louceng_id=601&room_id=15160 */
     var cardRoom: String
         get() = sp.getString(key("card_room"), "") ?: ""
         set(v) = sp.edit().putString(key("card_room"), v).apply()
+
+    /** 定时查询开关与时刻 */
+    var cardAutoOn: Boolean
+        get() = sp.getBoolean(key("card_auto_on"), false)
+        set(v) = sp.edit().putBoolean(key("card_auto_on"), v).apply()
+
+    var cardHour: Int
+        get() = sp.getInt(key("card_hour"), 8)
+        set(v) = sp.edit().putInt(key("card_hour"), v.coerceIn(0, 23)).apply()
+
+    var cardMinute: Int
+        get() = sp.getInt(key("card_min"), 0)
+        set(v) = sp.edit().putInt(key("card_min"), v.coerceIn(0, 59)).apply()
+
+    /** 余额预警开关与阈值（单位随返回的标签，电费是度） */
+    var cardWarnOn: Boolean
+        get() = sp.getBoolean(key("card_warn_on"), false)
+        set(v) = sp.edit().putBoolean(key("card_warn_on"), v).apply()
+
+    var cardWarn: Double
+        get() = sp.getFloat(key("card_warn"), 20f).toDouble()
+        set(v) = sp.edit().putFloat(key("card_warn"), v.toFloat().coerceAtLeast(0f)).apply()
+
+    /** 最近一次查询结果缓存：见 CardWatch.encode */
+    var cardCache: String
+        get() = sp.getString(key("card_cache"), "") ?: ""
+        set(v) = sp.edit().putString(key("card_cache"), v).apply()
+
+    /** 上次发通知的时间，用来避免重复轰炸 */
+    var cardLastNotify: Long
+        get() = sp.getLong(key("card_last_notify"), 0L)
+        set(v) = sp.edit().putLong(key("card_last_notify"), v).apply()
+
+    /** 费项编号（电费那条），定时查询用 */
+    var cardItemId: String
+        get() = sp.getString(key("card_item"), "") ?: ""
+        set(v) = sp.edit().putString(key("card_item"), v).apply()
 
     /** 电费房间的可读名字，形如 某校区某号楼 A区1层 101 */
     var cardRoomName: String
@@ -224,6 +269,12 @@ internal fun mergeAccounts(order: List<String>, stored: List<String>): List<Stri
 /**
  * 账号私有数据的键名。抽成纯函数是为了能钉单测 —— 键名串了就等于两个账号的课表互相覆盖。
  */
+/** 某个账号名下需要随「退出/忘记登录」一起清掉的校园卡键 */
+internal fun cardKeysToWipe(all: Collection<String>, account: String): List<String> {
+    val suffix = "@" + account
+    return all.filter { it.startsWith("card_") && it.endsWith(suffix) }.sorted()
+}
+
 internal fun scopedKey(base: String, account: String): String =
     base + "@" + account.ifBlank { "_default" }
 

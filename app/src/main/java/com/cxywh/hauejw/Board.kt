@@ -287,6 +287,8 @@ internal fun Root(prefs: Prefs) {
             onLogout = {
                 scope.launch {
                     withContext(Dispatchers.IO) { JwApi.logout() }
+                    // 退出时把校园卡的凭据、读数、房间、预警一起清掉
+                    withContext(Dispatchers.IO) { CardFee.wipe(ctx, prefs.username) }
                     prefs.timetableCache = null
                     HaueWidget.refresh(ctx)
                     val imported = prefs.loadImported()
@@ -294,7 +296,11 @@ internal fun Root(prefs: Prefs) {
                     else { screen = Screen.Login() }
                 }
             },
-            onLoginAgain = { screen = Screen.Login() },
+            onLoginAgain = {
+                // 重新登录视为换会话：校园卡状态一并清掉
+                CardFee.wipe(ctx, prefs.username)
+                screen = Screen.Login()
+            },
             onSwitchAccount = { id ->
                 if (id != prefs.username) {
                     // 存过密码的直接切；没存过的去登录页，学号已填好，只差输密码

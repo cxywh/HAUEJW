@@ -54,6 +54,11 @@
             android:name=".RemindReceiver"
             android:exported="false" />
 
+        <!-- 电费定时查询：每天一次，查完重排下一次 -->
+        <receiver
+            android:name=".CardWatchReceiver"
+            android:exported="false" />
+
         <!-- 开机 / 应用升级 / 插拔电源后重排提醒与小组件闹钟 -->
         <receiver
             android:name=".BootReceiver"

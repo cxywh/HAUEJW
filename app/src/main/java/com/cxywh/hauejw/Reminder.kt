@@ -358,7 +358,9 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_POWER_CONNECTED,
             Intent.ACTION_POWER_DISCONNECTED,
             -> {
-                Reminder.rearmFromPlan(context, Prefs(context))
+                val p = Prefs(context)
+                Reminder.rearmFromPlan(context, p)
+                CardWatch.schedule(context, p)
                 // 闹钟被系统清空后小组件也停在旧内容上，一并刷新
                 HaueWidget.refresh(context)
             }
