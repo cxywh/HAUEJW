@@ -62,7 +62,7 @@ class WidgetStateTest {
         // 上午那节已经上完 → 灰
         assertEquals(WidgetRow("08:30", "高等数学A1", "9A306-307", past = true), st.rows[0])
         assertEquals(WidgetRow("14:00", "数字化服装定制", "9A306-307", past = false), st.rows[1])
-        assertEquals("下一节 · 今天 14:00 数字化服装定制 · 9A306-307", st.next)
+        assertEquals("明天没有课", st.next)   // 周三…不，周二没课：只看明天一天
     }
 
     @Test
@@ -77,7 +77,7 @@ class WidgetStateTest {
         val st = widgetState(tt(高数, 服装), t(2026, 10, 12, 16))
         assertEquals("今天的课已上完", st.today)
         assertTrue("两节都该是灰的", st.rows.all { it.past })
-        assertEquals("下一节 · 周一 08:30 高等数学A1 · 9A306-307", st.next)   // 顺延到下周
+        assertEquals("明天没有课", st.next)
     }
 
     @Test
@@ -107,14 +107,14 @@ class WidgetStateTest {
         assertEquals("学期已过 31% · 距放假 91 天", st.term)
         assertEquals("今天没有课", st.today)
         assertTrue(st.rows.isEmpty())
-        assertEquals("下一节 · 周一 08:30 高等数学A1 · 9A306-307", st.next)
+        assertEquals("下一节 · 明天 08:30 高等数学A1 · 9A306-307", st.next)
     }
 
     @Test
     fun `教室为空时下一节不带那个点`() {
         val noRoom = course("形势与政策", day = 1, s = 1, e = 2, room = "")
         val st = widgetState(tt(noRoom), t(2026, 10, 11, 10))
-        assertEquals("下一节 · 周一 08:30 形势与政策", st.next)
+        assertEquals("下一节 · 明天 08:30 形势与政策", st.next)
     }
 
     @Test
@@ -124,7 +124,7 @@ class WidgetStateTest {
         assertEquals("开学日期 2026-08-31", st.term)
         assertEquals("今天没有课", st.today)
         assertTrue(st.rows.isEmpty())
-        assertEquals("接下来两周没有课", st.next)
+        assertEquals("明天没有课", st.next)
     }
 
     @Test
@@ -133,7 +133,7 @@ class WidgetStateTest {
         assertEquals("已结课", st.week)
         assertEquals("学期已结束 · 已放假", st.term)
         assertEquals("今天没有课", st.today)
-        assertEquals("接下来两周没有课", st.next)
+        assertEquals("明天没有课", st.next)
     }
 
     @Test
@@ -156,5 +156,47 @@ class WidgetStateTest {
         assertEquals("没有学期结束日期，算不出距放假", st.term)
         assertEquals("今天还剩 1 节", st.today)
         assertEquals(2, st.rows.size)
+    }
+
+    // ───────────── 下一节只看明天 ─────────────
+
+    @Test
+    fun `今天还有课也只报明天的`() {
+        // 周一 13:00：今天 14:00 还有一节，但明天没课
+        val st = widgetState(tt(高数, 服装), t(2026, 10, 12, 13))
+        assertEquals("明天没有课", st.next)
+    }
+
+    @Test
+    fun `明天有课时报明天第一节`() {
+        val cs = arrayOf(
+            course("周二早八", day = 2, s = 1, e = 2),
+            course("周二下午", day = 2, s = 5, e = 6),
+        )
+        val st = widgetState(tt(*cs), t(2026, 10, 12, 20))
+        assertEquals("下一节 · 明天 08:30 周二早八 · 9A306-307", st.next)
+    }
+
+    @Test
+    fun `明天跨周也照算`() {
+        // 周日 20:00，明天是周一：第 7 周
+        val st = widgetState(tt(高数), t(2026, 10, 11, 20))
+        assertEquals("下一节 · 明天 08:30 高等数学A1 · 9A306-307", st.next)
+    }
+
+    // ───────────── 电费一行 ─────────────
+
+    @Test
+    fun `电费有缓存时显示数值和时刻`() {
+        val raw = CardWatch.encode("剩余电量", 87.41, "度", java.time.LocalDateTime.of(2026, 10, 28, 13, 36)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())
+        val line = feeLine(raw, loggedIn = true)
+        assertTrue(line, line.startsWith("电费 87.41度 · 13:36"))
+    }
+
+    @Test
+    fun `电费没缓存时区分没查过和没登录`() {
+        assertEquals("电费 未查询", feeLine("", loggedIn = true))
+        assertEquals("电费 未登录", feeLine("", loggedIn = false))
     }
 }

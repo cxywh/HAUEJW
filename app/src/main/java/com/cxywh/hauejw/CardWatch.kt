@@ -173,6 +173,8 @@ object CardWatch {
             CardFee.meters(ctx, auth.token, item, picked, picked.size)
         }.onSuccess { a ->
             p.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
+            // 桌面小组件显示的就是这份缓存，查完立刻推一次，不必等下一次心跳
+            runCatching { HaueWidget.refresh(ctx) }
             if (p.cardWarnOn && a.value <= p.cardWarn) {
                 val now = System.currentTimeMillis()
                 if (now - p.cardLastNotify > 20L * 3600_000L) {

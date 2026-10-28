@@ -58,6 +58,17 @@
         android:autoSizeStepGranularity="1sp"
         android:text="" />
 
+    <!-- 电费：本机缓存的电量读数 -->
+    <TextView
+        android:id="@+id/w2_fee"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textSize="10.5sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="" />
+
     <!-- 还没有课表时顶上来的一段说明 -->
     <TextView
         android:id="@+id/w2_empty"

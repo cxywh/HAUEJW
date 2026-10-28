@@ -237,6 +237,17 @@
         android:ellipsize="end"
         android:text="" />
 
+    <!-- 电费：本机缓存的电量读数；没查过/没登录时由 Widget.kt 写字样 -->
+    <TextView
+        android:id="@+id/w_fee"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="3dp"
+        android:textSize="11sp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="" />
+
     <!-- ── 回声洞：课表下面的自定义一句话（常用功能 → 回声洞 里开关）──
          四帧 ViewFlipper 做「机器故障」：三帧乱码 + 一帧正片，换句时连着播。
          这块吃掉课表之后的余下高度：长句要能整句读完，就得有个确定的高度给字号自动缩放。 -->

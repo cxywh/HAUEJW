@@ -48,8 +48,9 @@ class WidgetSizeTest {
         )
         // 08:00：1-2 节还没开始，两节都在等着
         assertEquals("今天还剩 2 节", s.today)
-        assertEquals("今天 08:30", s.nextWhen)
-        assertEquals("高等数学A1", s.nextName)
+        // 下一节只看明天：今天是周一，明天（周二）没课
+        assertEquals("", s.nextWhen)
+        assertEquals("明天没有课", s.nextName)
     }
 
     @Test
@@ -143,5 +144,18 @@ class WidgetSizeTest {
         assertEquals(1, dpToCells(0))
         assertEquals(1, dpToCells(-5))
         assertEquals(1, dpToCells(40))
+    }
+
+    @Test
+    fun `简版报明天第一节`() {
+        val s = smallState(tt(course("周二早八", day = 2, s = 1, e = 2)), t(20))
+        assertEquals("明天 08:30", s.nextWhen)
+        assertEquals("周二早八", s.nextName)
+    }
+
+    @Test
+    fun `简版带电压费一行`() {
+        val s = smallState(tt(course("周二早八", day = 2, s = 1, e = 2)), t(20), fee = "电费 未查询")
+        assertEquals("电费 未查询", s.fee)
     }
 }

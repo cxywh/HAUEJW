@@ -30,6 +30,8 @@ data class WidgetState(
     val rows: List<WidgetRow>,
     val next: String,
     val empty: String?,
+    /** 电费一行：有本机缓存就显示数值，没有就写「未查询 / 未登录」 */
+    val fee: String = "",
 )
 
 /** 小组件布局里默认就 4 行课，超出的用最后一行提示「还有 N 门课…」；详细版按高度可以只给 2~4 行 */
@@ -53,7 +55,9 @@ fun widgetRowsFor(heightDp: Int, echoOn: Boolean): Int {
 private val WIDGET_DATE_FMT = DateTimeFormatter.ofPattern("M月d日")
 
 /** 小组件当前该显示的内容。纯函数：时间由参数传入，课表为空就用空态。maxRows 由可用高度决定。 */
-fun widgetState(tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS): WidgetState {
+fun widgetState(
+    tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS, fee: String = "",
+): WidgetState {
     val rows0 = maxRows.coerceAtLeast(1)
     val today = now.toLocalDate()
     val dateText = today.format(WIDGET_DATE_FMT) + " " + WeekUtils.WEEK_LABELS[WeekUtils.dowOf(today) - 1]
@@ -67,6 +71,7 @@ fun widgetState(tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS):
             rows = emptyList(),
             next = "",
             empty = "打开 App 登录一次，课表就会显示在这里",
+            fee = fee,
         )
     }
 
@@ -81,6 +86,7 @@ fun widgetState(tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS):
             rows = emptyList(),
             next = "",
             empty = null,
+            fee = fee,
         )
     }
 
@@ -119,13 +125,12 @@ fun widgetState(tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS):
         rows += WidgetRow("", "还有 ${list.size - (rows0 - 1)} 门课…", "", past = false, note = true)
     }
 
-    val nc = nextClass(tt, now)
+    val nc = tomorrowFirstClass(tt, now)
     val nextLine = if (nc == null) {
-        "接下来两周没有课"
+        "明天没有课"
     } else {
-        val day = if (nc.isToday) "今天" else WeekUtils.WEEK_LABELS[WeekUtils.dowOf(nc.date) - 1]
         val room = if (nc.course.room.isNotBlank()) " · " + nc.course.room else ""
-        "下一节 · $day ${nc.begin} ${nc.course.name}$room"
+        "下一节 · 明天 ${nc.begin} ${nc.course.name}$room"
     }
 
     // 周次只要开学日就能算；semesterProgress 为空（缺结束日）时也要显示第几周
@@ -140,6 +145,7 @@ fun widgetState(tt: Timetable?, now: LocalDateTime, maxRows: Int = WIDGET_ROWS):
         rows = rows,
         next = nextLine,
         empty = null,
+        fee = fee,
     )
 }
 
@@ -152,11 +158,13 @@ data class SmallState(
     val nextWhen: String,
     val nextName: String,
     val empty: String?,
+    /** 电费一行，与详细版同一句话 */
+    val fee: String = "",
 )
 
 /** 2x2 简版当前该显示的内容。纯函数，和 [widgetState] 共用同一批判断。 */
-fun smallState(tt: Timetable?, now: LocalDateTime): SmallState {
-    fun blank(msg: String) = SmallState("", "", "", msg)
+fun smallState(tt: Timetable?, now: LocalDateTime, fee: String = ""): SmallState {
+    fun blank(msg: String) = SmallState("", "", "", msg, fee)
 
     if (tt == null) return blank("打开 App 登录一次，课表就会显示在这里")
     if (tt.term.startDate == null) return blank("导入的课表没有校历，无法判断今天该上什么课")
@@ -172,14 +180,28 @@ fun smallState(tt: Timetable?, now: LocalDateTime): SmallState {
         else -> "今天还剩 ${remain.size} 节"
     }
 
-    val nc = nextClass(tt, now) ?: return SmallState(todayLine, "接下来两周没有课", "", null)
-    val day = if (nc.isToday) "今天" else WeekUtils.WEEK_LABELS[WeekUtils.dowOf(nc.date) - 1]
+    val nc = tomorrowFirstClass(tt, now)
+        ?: return SmallState(todayLine, "", "明天没有课", null, fee)
     return SmallState(
         today = todayLine,
-        nextWhen = "$day ${nc.begin}",
+        nextWhen = "明天 ${nc.begin}",
         nextName = nc.course.name,
         empty = null,
+        fee = fee,
     )
+}
+
+/**
+ * 小组件里的电费一行。
+ * 有本机缓存就写数值和查询时刻；没有就说清是「没查过」还是「没登录」。
+ */
+fun feeLine(cache: String, loggedIn: Boolean): String {
+    val c = CardWatch.decode(cache)
+    if (c == null) return if (loggedIn) "电费 未查询" else "电费 未登录"
+    val v = if (c.value == c.value.toLong().toDouble()) c.value.toLong().toString()
+    else String.format(java.util.Locale.US, "%.2f", c.value)
+    val t = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(c.at))
+    return "电费 " + v + c.unit + " · " + t
 }
 
 /**

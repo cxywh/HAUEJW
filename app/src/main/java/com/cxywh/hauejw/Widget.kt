@@ -242,12 +242,18 @@ class HaueWidget : AppWidgetProvider() {
                 }
                 return
             }
+            // 电费：只读本机缓存，小组件不联网；没有缓存就写明是没查过还是没登录
+            val fee = feeLine(
+                prefs.cardCache,
+                SecretStore.has(ctx, "card@" + prefs.username),
+            )
+
             // 内容与各尺寸的「该显示什么」都只算一次：下面每个实例、动画的每一帧都复用，不重复解课表
-            val sm = smallState(tt, now)
+            val sm = smallState(tt, now, fee)
             val round = echoRound(ctx, prefs, advanceEcho)
             val jobs = ids.map { id -> jobOf(mgr, id) }
             val stByHeight = jobs.map { it.hDp }.distinct()
-                .associateWith { h -> widgetState(tt, now, widgetRowsFor(h, round != null)) }
+                .associateWith { h -> widgetState(tt, now, widgetRowsFor(h, round != null), fee) }
 
             logSizes(jobs, prefs)
 
@@ -352,6 +358,10 @@ class HaueWidget : AppWidgetProvider() {
             v.setTextViewText(R.id.w2_next_name, sm.nextName)
             v.setTextColor(R.id.w2_next_name, if (hasNext) wFg(p) else wDim(p))
 
+            v.setTextViewText(R.id.w2_fee, sm.fee)
+            v.setTextColor(R.id.w2_fee, wSub(p))
+            v.setViewVisibility(R.id.w2_fee, if (sm.fee.isBlank()) View.GONE else View.VISIBLE)
+
             v.setTextViewText(R.id.w2_empty, sm.empty ?: "")
             v.setViewVisibility(R.id.w2_empty, if (sm.empty != null) View.VISIBLE else View.GONE)
             return v
@@ -407,6 +417,9 @@ class HaueWidget : AppWidgetProvider() {
 
             v.setTextViewText(R.id.w_next, st.next)
             v.setTextColor(R.id.w_next, wSub(p))
+            v.setTextViewText(R.id.w_fee, st.fee)
+            v.setTextColor(R.id.w_fee, wSub(p))
+            v.setViewVisibility(R.id.w_fee, if (st.fee.isBlank()) View.GONE else View.VISIBLE)
 
             if (round == null) {
                 v.setViewVisibility(R.id.w_echo_line, View.GONE)

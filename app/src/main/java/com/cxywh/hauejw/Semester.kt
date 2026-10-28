@@ -90,6 +90,14 @@ data class NextClass(
     val isToday: Boolean,
 )
 
+/** 明天的第一节课。小组件的「下一节」只看明天一天，不往后找。 */
+fun tomorrowFirstClass(tt: Timetable, now: LocalDateTime): NextClass? {
+    val date = now.toLocalDate().plusDays(1)
+    val c = coursesOn(tt, date).minByOrNull { it.startSlot } ?: return null
+    val begin = Slots.of(c.startSlot)?.beginTime ?: return null
+    return NextClass(c, date, begin, isToday = false)
+}
+
 fun nextClass(tt: Timetable, now: LocalDateTime, horizonDays: Int = 14): NextClass? {
     val today = now.toLocalDate()
     for (i in 0..horizonDays) {
