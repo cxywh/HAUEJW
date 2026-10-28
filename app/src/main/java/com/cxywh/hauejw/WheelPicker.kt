@@ -31,6 +31,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+
+// 两列固定 38dp 高、5 行可见；列表做成常量，别在重组里反复 toList()
+private val ITEM_H = 38.dp
+private val COL_W = 86.dp
+private const val ROWS = 5
+private val HOURS = (0..23).toList()
+private val MINUTES = (0..59).toList()
 
 /**
  * 拨轮选择器：上下拖动选值，值在中间一行高亮，两侧按距离淡出。
@@ -44,8 +52,8 @@ internal fun Wheel(
     value: Int,
     onValue: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    itemHeight: Dp = 38.dp,
-    rows: Int = 5,
+    itemHeight: Dp = ITEM_H,
+    rows: Int = ROWS,
     fontSize: androidx.compose.ui.unit.TextUnit = 24.sp,
 ) {
     val n = values.size
@@ -75,7 +83,7 @@ internal fun Wheel(
 
     // 外部值变化时对齐（拖动中不打扰）
     LaunchedEffect(value, n) {
-        if (state.isScrollInProgress) return@LaunchedEffect
+        if (state.isScrollInProgress) snapshotFlow { state.isScrollInProgress }.first { !it }
         val cur = ((center % n) + n) % n
         if (cur != value) state.scrollToItem((n + value).coerceIn(0, total - 1))
     }
@@ -133,8 +141,8 @@ internal fun TimeWheel(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Wheel((0..23).toList(), hour, onHour, Modifier.width(86.dp).height(38.dp * 5))
+        Wheel(HOURS, hour, onHour, Modifier.width(COL_W).height(ITEM_H * ROWS))
         Text(":", fontSize = 22.sp, color = C.dim, modifier = Modifier.padding(horizontal = 4.dp))
-        Wheel((0..59).toList(), minute, onMinute, Modifier.width(86.dp).height(38.dp * 5))
+        Wheel(MINUTES, minute, onMinute, Modifier.width(COL_W).height(ITEM_H * ROWS))
     }
 }

@@ -24,6 +24,9 @@ import javax.crypto.spec.GCMParameterSpec
  */
 object SecretStore {
 
+    /** 键名形状 <命名空间>@<主体>，如 card@学号；带分隔符的都不是账号 */
+    private const val NS_SEP = "@"
+
     private const val STORE = "AndroidKeyStore"
     private const val ALIAS = "hauejw_password_key"
     private const val SP = "hauejw_sec"
@@ -99,7 +102,7 @@ object SecretStore {
             .filter { it.startsWith("$K_CT@") }
             .map { it.removePrefix("$K_CT@") }
             // 校园卡查询凭据存在同一个库（键 card@学号），它不是账号，不能出现在切换列表里
-            .filter { it.isNotBlank() && !it.contains("@") }
+            .filter { it.isNotBlank() && !it.contains(NS_SEP) }
             .distinct()
     } catch (_: Exception) {
         emptyList()

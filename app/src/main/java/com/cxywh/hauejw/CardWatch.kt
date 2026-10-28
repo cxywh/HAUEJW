@@ -97,24 +97,39 @@ object CardWatch {
 
     /** 本机存过的账号各按自己的设置重排一次（开机、改系统时间后用） */
     fun syncAll(ctx: Context) {
-        val accounts = (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
+        val accounts = accounts(ctx)
         accounts.forEach { sync(ctx, it) }
     }
+
+    /** 两条通知之间至少隔这么久，免得一天里反复响 */
+    private const val WARN_COOLDOWN_MS = 20L * 3600_000L
+    private const val FAIL_COOLDOWN_MS = 12L * 3600_000L
+
+    /** 看门狗周期与「刚挂过就不重挂」的窗口 */
+    private const val WATCHDOG_MS = 6L * 3600_000L
+    private const val WATCHDOG_SLACK_MS = 5L * 3600_000L
+
+    /** 超过预定时刻这么久才算漏查 */
+    private const val CATCH_UP_LAG_MS = 10L * 60_000L
+
+    /** 该不该补查：开着、排过、过了预定时刻 10 分钟以上，且不在禁查时段 */
+    fun shouldCatchUp(enabled: Boolean, next: Long, now: Long, hour: Int): Boolean {
+        if (!enabled || next <= 0L) return false
+        if (hour >= QUIET_FROM || hour < QUIET_TO) return false
+        return now > next + CATCH_UP_LAG_MS
+    }
+
+    /** 本机所有学号：本地设置里记的 + 存过凭据的 */
+    private fun accounts(ctx: Context): List<String> =
+        (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
 
     /**
      * 补查：进程被杀、闹钟被系统清掉之后，下次有机会时把漏掉的那次补上。
      * 判断依据是本机记下的「下次该查的时刻」，超过 10 分钟算漏。
      * 23:00–03:00 不查，只把闹钟重排一次。
      */
-    /** 该不该补查：开着、排过、过了预定时刻 10 分钟以上，且不在禁查时段 */
-    fun shouldCatchUp(enabled: Boolean, next: Long, now: Long, hour: Int): Boolean {
-        if (!enabled || next <= 0L) return false
-        if (hour >= QUIET_FROM || hour < QUIET_TO) return false
-        return now > next + 10 * 60_000L
-    }
-
     fun catchUp(ctx: Context) {
-        val accounts = (Prefs(ctx).accounts + SecretStore.accounts(ctx)).distinct()
+        val accounts = accounts(ctx)
         val nowZ = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault())
         accounts.forEach { acc ->
             val p = Prefs(ctx, acc)
@@ -134,7 +149,7 @@ object CardWatch {
     fun ensureWatchdog(ctx: Context) {
         val p = Prefs(ctx)
         val now = System.currentTimeMillis()
-        if (now - p.watchArmedAt in 0 until 5L * 3600_000L) return
+        if (now - p.watchArmedAt in 0 until WATCHDOG_SLACK_MS) return
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = PendingIntent.getBroadcast(
             ctx,
@@ -145,8 +160,8 @@ object CardWatch {
         runCatching {
             am.setInexactRepeating(
                 AlarmManager.RTC_WAKEUP,
-                now + 6L * 3600_000L,
-                6L * 3600_000L,
+                now + WATCHDOG_MS,
+                WATCHDOG_MS,
                 pi,
             )
         }.onSuccess { p.watchArmedAt = now }.onFailure { Diag.record("CardWatch.watchdog", it) }
@@ -159,50 +174,62 @@ object CardWatch {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    /** 查一次并落缓存；失败与低余额各发一条通知 */
+    /**
+     * 查一次并落缓存；低余额与查询失败各发一条通知。
+     * 取数在 [fetch] 里，这里只管结果落盘与要不要提醒。
+     */
     fun check(ctx: Context, account: String) {
         if (account.isBlank()) return
         val p = Prefs(ctx, account)
-        val room = p.cardRoom
         val item = p.cardItemId
-        if (room.isBlank() || item.isBlank()) return
-        val picked = CardFee.roomOf(room)
-        runCatching {
-            var auth = CardFee.load(ctx, account) ?: throw CardFee.NeedLogin()
-            if (!auth.alive()) auth = CardFee.refresh(auth) ?: throw CardFee.NeedLogin()
-            CardFee.meters(ctx, auth.token, item, picked, picked.size)
-        }.onSuccess { a ->
-            p.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
-            // 桌面小组件显示的就是这份缓存，查完立刻推一次，不必等下一次心跳
-            runCatching { HaueWidget.refresh(ctx) }
-            if (p.cardWarnOn && a.value <= p.cardWarn) {
-                val now = System.currentTimeMillis()
-                if (now - p.cardLastNotify > 20L * 3600_000L) {
-                    val where = p.cardRoomName.ifBlank { "宿舍电费" }
-                    notify(
-                        ctx, account,
-                        "电费余额低",
-                        where + " 剩余 " + fmt(a.value) + a.unit + "，已低于预警 " +
-                            fmt(p.cardWarn) + a.unit,
-                    )
-                    p.cardLastNotify = now
-                }
-            }
-        }.onFailure { e ->
-            val now = System.currentTimeMillis()
-            if (now - p.cardLastNotify > 12L * 3600_000L) {
-                notify(
-                    ctx, account,
-                    "电费查询失败",
-                    if (e is CardFee.NeedLogin) "登录已过期，去「电费查询」重新登录一次。"
-                    else "查询出错：" + (e.message ?: e.javaClass.simpleName),
-                )
-                p.cardLastNotify = now
-            }
-        }
+        if (p.cardRoom.isBlank() || item.isBlank()) return
+
+        runCatching { fetch(ctx, account, p, item) }
+            .onSuccess { a -> onOk(ctx, account, p, a) }
+            .onFailure { e -> onFail(ctx, account, p, e) }
     }
 
-    private fun fmt(v: Double): String =
+    private fun fetch(ctx: Context, account: String, p: Prefs, item: String): CardFee.Amount {
+        val picked = CardFee.roomOf(p.cardRoom)
+        var auth = CardFee.load(ctx, account) ?: throw CardFee.NeedLogin()
+        if (!auth.alive()) {
+            auth = CardFee.refresh(auth) ?: throw CardFee.NeedLogin()
+            CardFee.save(ctx, account, auth)   // 刷新到的新 token 直接落盘，下次少换一次
+        }
+        return CardFee.meters(ctx, auth.token, item, picked, picked.size)
+    }
+
+    private fun onOk(ctx: Context, account: String, p: Prefs, a: CardFee.Amount) {
+        p.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
+        // 桌面小组件显示的就是这份缓存，查完立刻推一次，不必等下一次心跳
+        runCatching { HaueWidget.refresh(ctx) }
+        if (!p.cardWarnOn || a.value > p.cardWarn) return
+        val now = System.currentTimeMillis()
+        if (now - p.cardLastNotify <= WARN_COOLDOWN_MS) return
+        val where = p.cardRoomName.ifBlank { "宿舍电费" }
+        notify(
+            ctx, account,
+            "电费余额低",
+            where + " 剩余 " + fmtNum(a.value) + a.unit + "，已低于预警 " + fmtNum(p.cardWarn) + a.unit,
+        )
+        p.cardLastNotify = now
+    }
+
+    private fun onFail(ctx: Context, account: String, p: Prefs, e: Throwable) {
+        Diag.record("CardWatch.check", e)
+        val now = System.currentTimeMillis()
+        if (now - p.cardLastNotify <= FAIL_COOLDOWN_MS) return
+        notify(
+            ctx, account,
+            "电费查询失败",
+            if (e is CardFee.NeedLogin) "登录已过期，去「电费查询」重新登录一次。"
+            else "查询出错：" + (e.message ?: e.javaClass.simpleName),
+        )
+        p.cardLastNotify = now
+    }
+
+    /** 87.0 → "87"，87.41 → "87.41"；小组件的电费行也用这个 */
+    internal fun fmtNum(v: Double): String =
         if (v == v.toLong().toDouble()) v.toLong().toString()
         else String.format(java.util.Locale.US, "%.2f", v)
 

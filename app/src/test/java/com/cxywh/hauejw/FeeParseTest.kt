@@ -199,4 +199,12 @@ class FeeParseTest {
     fun showOf_nullWhenNoNumber() {
         assertNull(CardFee.showOf("""{"map":{"tipinfo":"未绑定房间信息！"}}"""))
     }
+
+    @Test
+    fun `凭据键带 card 前缀且按学号区分`() {
+        assertEquals("card@20230001", CardFee.cardKey("20230001"))
+        assertTrue(CardFee.cardKey("20230001") != CardFee.cardKey("20230002"))
+        // 账号列表靠这个前缀判断，改了前缀必须同步 SecretStore 的过滤
+        assertTrue(CardFee.cardKey("x").startsWith(CardFee.CARD_PREFIX))
+    }
 }

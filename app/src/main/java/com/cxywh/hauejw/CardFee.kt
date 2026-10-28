@@ -33,11 +33,22 @@ object CardFee {
     /** 门户首页；登录成功后 sessionStorage 里会有 access_token */
     const val PORTAL = "$BASE/plat/shouyeUser?index=1"
 
+    /** 校内查询凭据在 SecretStore 里的键：card@<学号>；带 @ 的键不是账号，账号列表里会被跳过 */
+    const val CARD_PREFIX = "card@"
+
+    fun cardKey(sno: String) = CARD_PREFIX + sno
+
     /** 门户前端里写死的客户端凭据（前端 JS 里明文可见），换 token 与刷新 token 时作为 Basic 认证 */
     private const val CLIENT = "bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm06bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm1fc2VjcmV0"
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
     private const val SRC = "h5"
+    private const val CONNECT_MS = 15_000
+    private const val READ_MS = 20_000
+
+    /** 缴费类接口（/charge 前缀）额外要带的 Basic，同样是前端 JS 里的值 */
+    private const val PAY_BASIC = "Basic Y2hhcmdlOmNoYXJnZV9zZWNyZXQ="
+    private const val PATH_THIRD = "/charge/feeitem/getThirdData"
 
     /** 一个可查余额的费项（电费 / 水费 / 网费…），id 就是接口要的 feeitemid */
     data class Item(val id: String, val name: String)
@@ -53,8 +64,6 @@ object CardFee {
     /** 需要重新登录（401/403，或刷新 token 失败） */
     class NeedLogin(message: String = "登录已过期，请重新登录校园卡") : IOException(message)
 
-    /** 内存里的登录态：token 不写日志、不进 Intent；落盘那份经 SecretStore 加密 */
-
     // ───────────────────────── 纯解析 ─────────────────────────
 
     // 费项编号在 website 里：本校是 /charge/feeitem/toAppitem?feeitemid=408，
@@ -63,6 +72,11 @@ object CardFee {
     private val APP_NAME = Regex(""""appName"\s*:\s*"((?:[^"\\]|\\.)*)"""")
     private val NAME_ANY = Regex(""""(?:name|otherName)"\s*:\s*"((?:[^"\\]|\\.)*)"""")
     private val INFO = Regex(""""信息"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+    private val KV = Regex("\"([^\"]+)\":\"([^\"]*)\"")
+    private val MSG = Regex("\"msg\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+    private val TOKEN = Regex("\"access_token\"\\s*:\\s*\"([^\"]+)\"")
+    private val REFRESH = Regex("\"refresh_token\"\\s*:\\s*\"([^\"]+)\"")
+    private val EXPIRES = Regex("\"expires_in\"\\s*:\\s*\"?(\\d+)")
     private val NUM = Regex("""(剩余电量|剩余金额|剩余水费|剩余流量|余额)\s*[:：]?\s*([-+]?\d+(?:\.\d+)?)""")
 
     /** JSON 字符串里的 \\uXXXX、\\"、\\n 还原；不处理嵌套，调用方按需多跑一次 */
@@ -143,7 +157,7 @@ object CardFee {
     fun showOf(json: String): Amount? {
         val t = unescape(json)
         val inner = SHOW.find(t)?.groupValues?.get(1) ?: return amount(t)
-        val m = Regex("\"([^\"]+)\":\"([^\"]*)\"").find(inner) ?: return amount(t)
+        val m = KV.find(inner) ?: return amount(t)
         val raw = m.groupValues[1]
         val v = m.groupValues[2].toDoubleOrNull() ?: return null
         val unit = when {
@@ -157,7 +171,7 @@ object CardFee {
     /** 逐级取选项：level 0 取校区，1 取楼栋，2 取楼层，3 取房间 */
     fun step(ctx: Context?, token: String, itemId: String, picked: Map<String, String>, level: Int): Step {
         val form = form(picked, itemId) + "&type=select&level=" + level
-        val body = postPay("$BASE/charge/feeitem/getThirdData", token, form)
+        val body = payCall(PATH_THIRD, token, form)
         val st = stepOf(body)
         log(ctx, "step L" + level + " opts=" + st.opts.size + " len=" + body.length)
         return st
@@ -166,7 +180,7 @@ object CardFee {
     /** 房间定下来之后查电表读数 */
     fun meters(ctx: Context?, token: String, itemId: String, picked: Map<String, String>, level: Int): Amount {
         val form = form(picked, itemId) + "&type=IEC&level=" + level
-        val body = postPay("$BASE/charge/feeitem/getThirdData", token, form)
+        val body = payCall(PATH_THIRD, token, form)
         log(ctx, "iec level=" + level + " len=" + body.length + " body=" + body.take(400))
         return showOf(body) ?: throw IOException(msgOf(body) ?: "门户没有返回这项的数值")
     }
@@ -178,31 +192,29 @@ object CardFee {
         return all.entries.joinToString("&") { q(it.key) + "=" + q(it.value) }
     }
 
-    private fun postPay(url: String, token: String, payload: String): String {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15_000
-        c.readTimeout = 20_000
+    /**
+     * /charge 下的接口：除公共头外还要带缴费用的 Basic 与表单类型。
+     * 连接参数、UA、synjones-auth 都由 open() 统一给，不再抄一遍。
+     */
+    private fun payCall(path: String, token: String, form: String): String {
+        val c = open(BASE + path, token)
         c.requestMethod = "POST"
         c.doOutput = true
-        c.setRequestProperty("User-Agent", UA)
-        c.setRequestProperty("Accept", "application/json")
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        c.setRequestProperty("Authorization", "Basic Y2hhcmdlOmNoYXJnZV9zZWNyZXQ=")
-        c.setRequestProperty("synjones-auth", "bearer $token")
-        c.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+        c.setRequestProperty("Authorization", PAY_BASIC)
+        c.outputStream.use { it.write(form.toByteArray(Charsets.UTF_8)) }
         return body(c)
     }
 
     /** 业务失败时服务端会给一句中文，例如「未绑定房间信息！」 */
     fun msgOf(json: String): String? =
-        Regex("\"msg\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-            .find(unescape(json))?.groupValues?.get(1)?.trim()?.ifBlank { null }
+        MSG.find(unescape(json))?.groupValues?.get(1)?.trim()?.ifBlank { null }
 
     /** 从 oauth 返回里取 token；refresh_token 与 expires_in 可能缺 */
     fun parseToken(json: String): Auth? {
-        val tok = Regex(""""access_token"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1) ?: return null
-        val ref = Regex(""""refresh_token"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1).orEmpty()
-        val exp = Regex("\"expires_in\"\\s*:\\s*\"?(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val tok = TOKEN.find(json)?.groupValues?.get(1) ?: return null
+        val ref = REFRESH.find(json)?.groupValues?.get(1).orEmpty()
+        val exp = EXPIRES.find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
         return Auth(tok, ref, if (exp > 0) System.currentTimeMillis() + exp * 1000 else 0L)
     }
 
@@ -210,8 +222,8 @@ object CardFee {
 
     private fun open(url: String, token: String?): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15_000
-        c.readTimeout = 20_000
+        c.connectTimeout = CONNECT_MS
+        c.readTimeout = READ_MS
         c.instanceFollowRedirects = true
         c.setRequestProperty("User-Agent", UA)
         c.setRequestProperty("Accept", "application/json")
@@ -267,10 +279,13 @@ object CardFee {
     private fun q(s: String) = URLEncoder.encode(s, "UTF-8")
 
     /** 诊断：把接口原始返回的开头写进 Android/data/…/files/card.log，排查解析用 */
+    private fun logFile(ctx: Context) =
+        java.io.File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "card.log")
+
     fun log(ctx: Context?, text: String) {
         if (ctx == null) return
         runCatching {
-            val f = java.io.File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "card.log")
+            val f = logFile(ctx)
             if (f.length() > 1024 * 1024) f.delete()
             f.appendText(System.currentTimeMillis().toString() + " CF " + text + "\n")
         }
@@ -282,22 +297,6 @@ object CardFee {
         val body = get(url, token)
         log(ctx, "listAppByType len=" + body.length + " items=" + itemsOf(body).size)
         return itemsOf(body)
-    }
-
-    /** 某个费项的余额 */
-    fun fetchAmount(ctx: Context?, token: String, itemId: String): Amount {
-        val url = "$BASE/charge/feeitem/getThirdDataByFeeItemId?feeitemid=${q(itemId)}&synAccessSource=$SRC"
-        val body = get(url, token)
-        if (amount(body) == null) log(ctx, "balance id=" + itemId + " len=" + body.length + " body=" + body.take(300))
-        amount(body)?.let { return it }
-        val m = msgOf(body)
-        throw IOException(
-            when {
-                m == null || m.equals("success", true) -> "门户没有返回这项的数值"
-                m.contains("未绑定") -> m
-                else -> "门户没有返回这项的数值"
-            }
-        )
     }
 
     /** 用 refresh_token 换新的 access_token；失败返回 null，调用方转去重新登录 */
@@ -325,11 +324,11 @@ object CardFee {
 
     /** token 用 Keystore 派生的密钥加密后落盘（同密码存储那套）；键名带学号，多账号互不干扰 */
     fun save(ctx: Context, sno: String, a: Auth): Boolean =
-        SecretStore.save(ctx, "card@$sno", "${q(a.token)}|${q(a.refresh)}|${a.expiresAt}")
+        SecretStore.save(ctx, cardKey(sno), "${q(a.token)}|${q(a.refresh)}|${a.expiresAt}")
 
     /** 本机是否存有该学号的校园卡查询凭据 */
     fun bound(ctx: Context, sno: String): Boolean =
-        !SecretStore.load(ctx, "card@$sno").isNullOrBlank()
+        !SecretStore.load(ctx, cardKey(sno)).isNullOrBlank()
 
     /** 「xiaoqu_id=1&loudong_id=505&…」还原成键值对 */
     fun roomOf(encoded: String): Map<String, String> =
@@ -339,7 +338,7 @@ object CardFee {
         }.toMap()
 
     fun load(ctx: Context, sno: String): Auth? {
-        val raw = SecretStore.load(ctx, "card@$sno") ?: return null
+        val raw = SecretStore.load(ctx, cardKey(sno)) ?: return null
         val p = raw.split("|")
         if (p.size != 3) return null
         val tok = try { URLDecoder.decode(p[0], "UTF-8") } catch (e: Exception) { "" }
@@ -348,8 +347,9 @@ object CardFee {
         return Auth(tok, ref, p[2].toLongOrNull() ?: 0L)
     }
 
-    fun clear(ctx: Context, sno: String) {
-        SecretStore.save(ctx, "card@$sno", "")
+    /** 只丢 token：界面还留着上次读数，用户点「立即查询」会提示重新登录 */
+    fun dropToken(ctx: Context, sno: String) {
+        SecretStore.save(ctx, cardKey(sno), "")
     }
 
     /**
@@ -358,7 +358,8 @@ object CardFee {
      */
     fun wipe(ctx: Context, sno: String) {
         if (sno.isBlank()) return
-        SecretStore.forget(ctx, "card@$sno")
+        SecretStore.forget(ctx, cardKey(sno))
+        runCatching { logFile(ctx).delete() }
         val p = Prefs(ctx)
         p.wipeCard(sno)
         CardWatch.sync(ctx, sno)

@@ -198,10 +198,8 @@ fun smallState(tt: Timetable?, now: LocalDateTime, fee: String = ""): SmallState
 fun feeLine(cache: String, loggedIn: Boolean): String {
     val c = CardWatch.decode(cache)
     if (c == null) return if (loggedIn) "电费 未查询" else "电费 未登录"
-    val v = if (c.value == c.value.toLong().toDouble()) c.value.toLong().toString()
-    else String.format(java.util.Locale.US, "%.2f", c.value)
     val t = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(c.at))
-    return "电费 " + v + c.unit + " · " + t
+    return "电费 " + CardWatch.fmtNum(c.value) + c.unit + " · " + t
 }
 
 /**

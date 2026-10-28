@@ -1006,24 +1006,10 @@ internal fun AccountPane(
 
 // ─────────────────────── 校园卡 / 电费 ───────────────────────
 
-/** 金额显示：整数不带小数（50元），有小数保留两位（12.34度） */
-private fun moneyText(a: CardFee.Amount): String {
-    val n = if (a.value == a.value.toLong().toDouble()) {
-        String.format(Locale.US, "%,d", a.value.toLong())
-    } else {
-        String.format(Locale.US, "%.2f", a.value)
-    }
-    return n + a.unit
-}
-
 private fun two(n: Int) = n.toString().padStart(2, '0')
 
 private fun clockOf(at: Long): String =
     java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(at))
-
-private fun plain(v: Double): String =
-    if (v == v.toLong().toDouble()) v.toLong().toString()
-    else String.format(Locale.US, "%.2f", v)
 
 /**
  * 电费查询（宿舍剩余电量）。
@@ -1055,7 +1041,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
     var hour by remember { mutableStateOf(prefs.cardHour) }
     var minute by remember { mutableStateOf(prefs.cardMinute) }
     var warnOn by remember { mutableStateOf(prefs.cardWarnOn) }
-    var warnText by remember { mutableStateOf(plain(prefs.cardWarn)) }
+    var warnText by remember { mutableStateOf(CardWatch.fmtNum(prefs.cardWarn)) }
 
     var permitted by remember {
         mutableStateOf(NotificationManagerCompat.from(ctx).areNotificationsEnabled())
@@ -1076,10 +1062,26 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         )
     }
 
+    /** 忘记登录：清本机状态并把界面复位。两处按钮共用，省得各写一遍还漏字段 */
+    fun forget() {
+        CardFee.wipe(ctx, sno)
+        auth = null
+        cache = null
+        itemId = ""
+        room = ""
+        roomName = ""
+        autoOn = false
+        warnOn = false
+        pickLevel = 0
+        pickParams = emptyMap()
+        pickNames = emptyList()
+        note = "已清除本机保存的校园卡状态。"
+    }
+
     fun saveWarn() {
         val v = warnText.trim().toDoubleOrNull() ?: return
         prefs.cardWarn = v
-        warnText = plain(prefs.cardWarn)
+        warnText = CardWatch.fmtNum(prefs.cardWarn)
     }
 
     // 费项编号：本机没有才去问一次
@@ -1102,7 +1104,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         }.onFailure { e ->
             if (e is CardFee.NeedLogin) {
                 auth = null
-                if (sno.isNotBlank()) CardFee.clear(ctx, sno)
+                if (sno.isNotBlank()) CardFee.dropToken(ctx, sno)
                 note = "登录已过期，请重新登录。"
             } else {
                 note = "查询失败：" + (e.message ?: e.javaClass.simpleName)
@@ -1141,10 +1143,12 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         r.onSuccess { a2 ->
             prefs.cardCache = CardWatch.encode(a2.label, a2.value, a2.unit, System.currentTimeMillis())
             cache = CardWatch.decode(prefs.cardCache)
+            // 手动查到的数也要立刻反映到桌面小组件，不然得等半小时心跳
+            runCatching { HaueWidget.refresh(ctx) }
         }.onFailure { e ->
             if (e is CardFee.NeedLogin) {
                 auth = null
-                if (sno.isNotBlank()) CardFee.clear(ctx, sno)
+                if (sno.isNotBlank()) CardFee.dropToken(ctx, sno)
                 note = "登录已过期，请重新登录。"
             } else {
                 note = e.message ?: "查询失败"
@@ -1239,16 +1243,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                     Text("重新登录")
                 }
                 TextButton(
-                    onClick = {
-                        CardFee.wipe(ctx, sno)
-                        auth = null
-                        cache = null
-                        room = ""
-                        roomName = ""
-                        autoOn = false
-                        warnOn = false
-                        note = "已清除本机保存的校园卡状态。"
-                    },
+                    onClick = { forget() },
                     colors = ButtonDefaults.textButtonColors(contentColor = C.dim),
                 ) { Text("忘记登录") }
             }
@@ -1266,7 +1261,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 )
             }
             cache?.let {
-                Text(plain(it.value) + it.unit, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)
+                Text(CardWatch.fmtNum(it.value) + it.unit, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)
             }
         }
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(C.line))
@@ -1387,16 +1382,7 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                 Text("重新登录")
             }
             TextButton(
-                onClick = {
-                    CardFee.wipe(ctx, sno)
-                    auth = null
-                    cache = null
-                    room = ""
-                    roomName = ""
-                    autoOn = false
-                    warnOn = false
-                    note = "已清除本机保存的校园卡状态。"
-                },
+                onClick = { forget() },
                 colors = ButtonDefaults.textButtonColors(contentColor = C.dim),
             ) { Text("忘记登录") }
         }
