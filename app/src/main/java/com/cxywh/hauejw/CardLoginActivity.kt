@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +23,9 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 /**
  * 校园卡门户登录。
@@ -38,6 +43,7 @@ class CardLoginActivity : Activity() {
 
     private lateinit var web: WebView
     private lateinit var hintBar: TextView
+    private lateinit var netHint: TextView
     private var done = false
     private var reloadCount = 0
 
@@ -49,7 +55,11 @@ class CardLoginActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            // 顶栏是深色，状态栏用浅色图标；底色铺满，状态栏区域才不是白块
+            setBackgroundColor(Color.parseColor("#1F2124"))
+        }
 
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -80,7 +90,7 @@ class CardLoginActivity : Activity() {
         bar.addView(close)
 
         hintBar = TextView(this).apply {
-            text = "站点暂时拒绝了访问（403），通常几分钟后自行恢复，期间点「刷新」不会更快。"
+            text = "站点拒绝了访问（403）。多半是校外网络或请求太频繁：连上校园网再点「刷新」，多数能直接进。"
             setTextColor(Color.parseColor("#FFD8A8"))
             setBackgroundColor(Color.parseColor("#3A2E20"))
             textSize = 12f
@@ -147,12 +157,34 @@ class CardLoginActivity : Activity() {
             }
         }
 
+        netHint = TextView(this).apply {
+            setTextColor(Color.parseColor("#9AA0A6"))
+            textSize = 11.5f
+            setPadding(dp(16), 0, dp(16), dp(10))
+            text = netHintText()
+        }
+
         root.addView(bar)
+        root.addView(netHint)
         root.addView(hintBar)
         root.addView(FrameLayout(this).apply { addView(web) }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
         setContentView(root)
+
+        // Android 15 起默认画到状态栏后面；这里把系统栏与输入法的高度让出来，
+        // 否则顶栏会被状态栏压住、键盘弹起时会盖住验证码输入框
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val sys = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(sys.left, sys.top, sys.right, maxOf(sys.bottom, ime.bottom))
+            insets
+        }
+        runCatching {
+            WindowInsetsControllerCompat(window, root).isAppearanceLightStatusBars = false
+        }
 
         // 只在上一轮被站点拒过（403）时才清 cookie 与 localStorage；
         // 平时不清，也不清 HTTP 缓存 —— 页面一冷启动要拉 120 多个分包，
@@ -175,6 +207,33 @@ class CardLoginActivity : Activity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /**
+     * 按当前网络给一句提示：站点的 WAF 按来源判，校外网络（尤其移动数据）容易被直接拒（403）。
+     * 只读网络类型，不申请定位、不读 SSID。
+     */
+    private fun netHintText(): String {
+        val cm = getSystemService(ConnectivityManager::class.java)
+            ?: return "登录被拒（403）时，先连校园网再试。"
+        val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            ?: return "当前没有网络连接。"
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ->
+                "当前 WLAN。被拒（403）时先连校园网再点刷新。"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ->
+                "当前是移动数据。校外网络常被判成异常而回 403，建议连校园网再登录。"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ->
+                "当前有线网络。被拒（403）时先连校园网再试。"
+            else ->
+                "当前网络可能不是校园网，被拒（403）时换校园网再试。"
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 用户可能中途从流量切到校园网，回来时按最新网络重写提示
+        if (::netHint.isInitialized) netHint.text = netHintText()
+    }
 
     /**
      * 换一个新会话：清 cookie 与 localStorage（不清 HTTP 缓存，重载很轻）后再载入。
