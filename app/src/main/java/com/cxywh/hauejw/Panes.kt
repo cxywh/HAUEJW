@@ -1141,7 +1141,9 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
         }
         busy = false
         r.onSuccess { a2 ->
-            prefs.cardCache = CardWatch.encode(a2.label, a2.value, a2.unit, System.currentTimeMillis())
+            val at = System.currentTimeMillis()
+            prefs.cardCache = CardWatch.encode(a2.label, a2.value, a2.unit, at)
+            prefs.cardHistory = CardWatch.pushHistory(prefs.cardHistory, a2.used, at)
             cache = CardWatch.decode(prefs.cardCache)
             // 手动查到的数也要立刻反映到桌面小组件，不然得等半小时心跳
             runCatching { HaueWidget.refresh(ctx) }
@@ -1259,6 +1261,21 @@ internal fun FeePane(prefs: Prefs, onClose: () -> Unit) {
                     roomName + (cache?.let { " · " + clockOf(it.at) + " 查过" } ?: " · 还没查过"),
                     fontSize = 11.sp, color = C.dim,
                 )
+                val now = System.currentTimeMillis()
+                val use = CardWatch.usage(prefs.cardHistory, now)
+                val days = cache?.let { CardWatch.daysLeft(it.value, prefs.cardHistory, now) }
+                if (days != null && use != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "够用约 " + days + " 天（近 " + use.days + " 天日均 " +
+                            String.format(Locale.US, "%.1f", use.perDay) + " 度）",
+                        fontSize = 11.sp, color = C.dim,
+                    )
+                } else if (cache != null) {
+                    // 只有一次读数，日均无从谈起；写清还要等多久，免得以为功能没生效
+                    Spacer(Modifier.height(2.dp))
+                    Text("够用天数：要两天以上的用电记录", fontSize = 11.sp, color = C.dim)
+                }
             }
             cache?.let {
                 Text(CardWatch.fmtNum(it.value) + it.unit, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = C.fg)

@@ -52,6 +52,69 @@ object CardWatch {
         return Cache(p[0], v, p[2], at)
     }
 
+    // ───────────────────────── 用电历史 ─────────────────────────
+
+    /** 一次读数里的累计用电量（usedAmp），与余额一起记，用来算日均 */
+    data class Sample(val at: Long, val used: Double)
+
+    private const val SAMPLE_SEP = ";"
+    private const val SAMPLE_KV = ":"
+    private const val DAY_MS = 24L * 3600_000L
+
+    /** 历史留 14 天（多一倍余量应付漏查），日均只看最近 7 天 */
+    private const val HISTORY_DAYS = 14L
+    private const val WINDOW_DAYS = 7L
+
+    fun decodeHistory(raw: String): List<Sample> =
+        raw.split(SAMPLE_SEP).mapNotNull { p ->
+            val kv = p.split(SAMPLE_KV)
+            if (kv.size != 2) return@mapNotNull null
+            val at = kv[0].toLongOrNull() ?: return@mapNotNull null
+            val used = kv[1].toDoubleOrNull() ?: return@mapNotNull null
+            Sample(at, used)
+        }.sortedBy { it.at }
+
+    fun encodeHistory(list: List<Sample>): String =
+        list.joinToString(SAMPLE_SEP) { it.at.toString() + SAMPLE_KV + String.format(java.util.Locale.US, "%.2f", it.used) }
+
+    /**
+     * 追加一条样本。同一天只留最后一条，超过 14 天的清掉；
+     * used 为 0 表示服务端没给这个字段，直接不记（记了会把日均压成 0）。
+     */
+    fun pushHistory(raw: String, used: Double, at: Long): String {
+        if (used <= 0.0) return raw
+        val kept = decodeHistory(raw)
+            .filter { it.at > at - HISTORY_DAYS * DAY_MS && it.at <= at }
+            .filterNot { it.at / DAY_MS == at / DAY_MS }
+        return encodeHistory(kept + Sample(at, used))
+    }
+
+    /** 日均用电：perDay 是度/天，days 是实际用到几天样本（不足 7 天时按实际的写） */
+    data class Usage(val perDay: Double, val days: Int)
+
+    /**
+     * 按最近 7 天的样本算日均；样本跨度不足 1 天、或读数倒退（换表/清零）返回 null。
+     * 头几天只有一两条记录时，用实际跨度算并如实标出天数，不硬凑成 7 天。
+     */
+    fun usage(raw: String, now: Long): Usage? {
+        val win = decodeHistory(raw).filter { it.at in (now - (WINDOW_DAYS + 1) * DAY_MS)..now }
+        if (win.size < 2) return null
+        val span = (win.last().at - win.first().at).toDouble() / DAY_MS
+        if (span < 1.0) return null
+        val used = win.last().used - win.first().used
+        if (used <= 0.0) return null
+        return Usage(used / span, span.toInt().coerceIn(1, WINDOW_DAYS.toInt()))
+    }
+
+    fun dailyUse(raw: String, now: Long): Double? = usage(raw, now)?.perDay
+
+    /** 按当前余额够用多少天；数据不够返回 null */
+    fun daysLeft(balance: Double, raw: String, now: Long): Int? {
+        val perDay = dailyUse(raw, now) ?: return null
+        if (perDay <= 0.0) return null
+        return kotlin.math.floor(balance / perDay).toInt().coerceAtLeast(0)
+    }
+
     /** 每个账号一个请求码，排别人的闹钟不会顶掉这个 */
     fun reqOf(account: String): Int = REQ_BASE or (account.hashCode() and 0xFFFF)
 
@@ -200,7 +263,9 @@ object CardWatch {
     }
 
     private fun onOk(ctx: Context, account: String, p: Prefs, a: CardFee.Amount) {
-        p.cardCache = encode(a.label, a.value, a.unit, System.currentTimeMillis())
+        val at = System.currentTimeMillis()
+        p.cardCache = encode(a.label, a.value, a.unit, at)
+        p.cardHistory = pushHistory(p.cardHistory, a.used, at)
         // 桌面小组件显示的就是这份缓存，查完立刻推一次，不必等下一次心跳
         runCatching { HaueWidget.refresh(ctx) }
         if (!p.cardWarnOn || a.value > p.cardWarn) return

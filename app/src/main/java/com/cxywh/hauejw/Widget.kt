@@ -243,9 +243,14 @@ class HaueWidget : AppWidgetProvider() {
                 return
             }
             // 电费：只读本机缓存，小组件不联网；没有缓存就写明是没查过还是没登录
+            val feeCache = prefs.cardCache
+            val feeDays = CardWatch.decode(feeCache)?.let {
+                CardWatch.daysLeft(it.value, prefs.cardHistory, System.currentTimeMillis())
+            }
             val fee = feeLine(
-                prefs.cardCache,
+                feeCache,
                 SecretStore.has(ctx, CardFee.cardKey(prefs.username)),
+                feeDays,
             )
 
             // 内容与各尺寸的「该显示什么」都只算一次：下面每个实例、动画的每一帧都复用，不重复解课表

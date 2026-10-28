@@ -67,6 +67,11 @@ class Prefs(context: Context, private val fixedAccount: String? = null) {
         set(v) = sp.edit().putString(key("card_cache"), v).apply()
 
     /** 上次发通知的时间，用来避免重复轰炸 */
+    /** 用电样本（时刻与累计用电量），算日均用；按账号分开 */
+    var cardHistory: String
+        get() = sp.getString(key("card_hist"), "") ?: ""
+        set(v) = sp.edit().putString(key("card_hist"), v).apply()
+
     var cardLastNotify: Long
         get() = sp.getLong(key("card_last_notify"), 0L)
         set(v) = sp.edit().putLong(key("card_last_notify"), v).apply()

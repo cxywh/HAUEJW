@@ -54,7 +54,8 @@ object CardFee {
     data class Item(val id: String, val name: String)
 
     /** 一句「剩余电量:12.34」拆出来的结果 */
-    data class Amount(val label: String, val value: Double, val unit: String)
+    /** used：服务端给的累计用电量（usedAmp），算日均用；没这个字段时为 0 */
+    data class Amount(val label: String, val value: Double, val unit: String, val used: Double = 0.0)
 
     data class Auth(val token: String, val refresh: String, val expiresAt: Long) {
         /** expiresAt 未知（0）时按有效算，真过期了接口会返回 401 */
@@ -77,6 +78,7 @@ object CardFee {
     private val TOKEN = Regex("\"access_token\"\\s*:\\s*\"([^\"]+)\"")
     private val REFRESH = Regex("\"refresh_token\"\\s*:\\s*\"([^\"]+)\"")
     private val EXPIRES = Regex("\"expires_in\"\\s*:\\s*\"?(\\d+)")
+    private val USED = Regex("\"usedAmp\"\\s*:\\s*\"?([0-9.]+)")
     private val NUM = Regex("""(剩余电量|剩余金额|剩余水费|剩余流量|余额)\s*[:：]?\s*([-+]?\d+(?:\.\d+)?)""")
 
     /** JSON 字符串里的 \\uXXXX、\\"、\\n 还原；不处理嵌套，调用方按需多跑一次 */
@@ -165,7 +167,7 @@ object CardFee {
             raw.contains("元") -> "元"
             else -> ""
         }
-        return Amount(raw.substringBefore('(').trim(), v, unit)
+        return Amount(raw.substringBefore('(').trim(), v, unit, USED.find(t)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0)
     }
 
     /** 逐级取选项：level 0 取校区，1 取楼栋，2 取楼层，3 取房间 */

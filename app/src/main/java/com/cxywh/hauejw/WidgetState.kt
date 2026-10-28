@@ -195,9 +195,11 @@ fun smallState(tt: Timetable?, now: LocalDateTime, fee: String = ""): SmallState
  * 小组件里的电费一行。
  * 有本机缓存就写数值和查询时刻；没有就说清是「没查过」还是「没登录」。
  */
-fun feeLine(cache: String, loggedIn: Boolean): String {
+fun feeLine(cache: String, loggedIn: Boolean, days: Int? = null): String {
     val c = CardWatch.decode(cache)
     if (c == null) return if (loggedIn) "电费 未查询" else "电费 未登录"
+    // 有足够的用电样本就报「还够用几天」，没有就退回到上次查询时刻
+    if (days != null) return "电费 " + CardWatch.fmtNum(c.value) + c.unit + " · 够用约" + days + "天"
     val t = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(c.at))
     return "电费 " + CardWatch.fmtNum(c.value) + c.unit + " · " + t
 }
